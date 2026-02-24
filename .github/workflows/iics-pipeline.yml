@@ -30,9 +30,22 @@ jobs:
         with: { python-version: '3.10' }
       - run: pip install -r requirements.txt
 
+      - name: Debug environment
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "PYTHONPATH: $PYTHONPATH"
+          echo "Contents of scripts:"
+          ls -la scripts/
+          echo "Contents of scripts/lib:"
+          ls -la scripts/lib/
+          echo "Checking for __init__.py files:"
+          test -f scripts/__init__.py && echo "scripts/__init__.py exists" || echo "scripts/__init__.py MISSING"
+          test -f scripts/lib/__init__.py && echo "scripts/lib/__init__.py exists" || echo "scripts/lib/__init__.py MISSING"
+            
+
       - name: Login to DEV
         env:
-          IICS_POD_URL: https://na1.dm-us.informaticacloud.com
+          IICS_POD_URL: https://dm-ap.informaticacloud.com
           IICS_USERNAME: ${{ secrets.DEV_IICS_USER }}
           IICS_PASSWORD: ${{ secrets.DEV_IICS_PWD }}
         run: python scripts/infa_login.py
@@ -83,7 +96,7 @@ jobs:
 
       - name: Login to UAT
         env:
-          IICS_POD_URL: https://na1.dm-us.informaticacloud.com
+          IICS_POD_URL: https://dm-ap.informaticacloud.com
           IICS_USERNAME: ${{ secrets.UAT_IICS_USER }}
           IICS_PASSWORD: ${{ secrets.UAT_IICS_PWD }}
         run: python scripts/infa_login.py
@@ -118,7 +131,7 @@ jobs:
 
       - name: Login to PROD
         env:
-          IICS_POD_URL: https://na1.dm-us.informaticacloud.com
+          IICS_POD_URL: https://dm-ap.informaticacloud.com
           IICS_USERNAME: ${{ secrets.PROD_IICS_USER }}
           IICS_PASSWORD: ${{ secrets.PROD_IICS_PWD }}
         run: python scripts/infa_login.py
