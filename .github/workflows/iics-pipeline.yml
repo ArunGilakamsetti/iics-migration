@@ -14,9 +14,9 @@ on:
         options: [ dev, uat, prod ]
 
 env:
-  IICS_REGION: ap
-  IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
-  PROJECT_PATH: Explore/Project_Alpha.Project
+  IICS_REGION: ap                                # Your region (us, eu, ap, etc.)
+  IICS_POD_HOST: apse1.dm-ap.informaticacloud.com  # Hostname only – no https://
+  PROJECT_PATH: Explore/Project_Alpha.Project    # Adjust to your actual project path
 
 jobs:
   export:
@@ -25,19 +25,23 @@ jobs:
     if: github.ref == 'refs/heads/dev' || github.event.inputs.environment == 'dev'
     environment: development
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Download IICS CLI (Linux)
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
+      - name: Create exports directory
+        run: mkdir -p exports
+
       - name: Export project from DEV
         run: |
           ./iics export \
             -n "DEV_Export_${{ github.sha }}" \
             -r ${{ env.IICS_REGION }} \
-            --podHostName ${{ env.IICS_POD_URL }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets.DEV_IICS_USER }} \
             -p ${{ secrets.DEV_IICS_PWD }} \
             -a "${{ env.PROJECT_PATH }}" \
@@ -58,7 +62,8 @@ jobs:
     if: github.ref == 'refs/heads/uat' || github.event.inputs.environment == 'uat'
     environment: uat
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Download IICS CLI (Linux)
         run: |
@@ -76,7 +81,7 @@ jobs:
           ./iics import \
             -n "UAT_Import_${{ github.sha }}" \
             -r ${{ env.IICS_REGION }} \
-            --podHostName ${{ env.IICS_POD_URL }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets.UAT_IICS_USER }} \
             -p ${{ secrets.UAT_IICS_PWD }} \
             -z package_${{ github.sha }}.zip \
@@ -89,7 +94,8 @@ jobs:
     if: github.ref == 'refs/heads/prod' || github.event.inputs.environment == 'prod'
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Download IICS CLI (Linux)
         run: |
@@ -107,14 +113,15 @@ jobs:
           ./iics import \
             -n "PROD_Import_${{ github.sha }}" \
             -r ${{ env.IICS_REGION }} \
-            --podHostName ${{ env.IICS_POD_URL }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets.PROD_IICS_USER }} \
             -p ${{ secrets.PROD_IICS_PWD }} \
             -z package_${{ github.sha }}.zip \
             -s true
 
-      - name: Create GitHub Release (optional)
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
+        if: success()
         with:
           tag_name: v${{ github.run_number }}
           name: Release v${{ github.run_number }}
