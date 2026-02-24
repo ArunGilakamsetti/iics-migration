@@ -45,7 +45,7 @@ jobs:
 
       - name: Login to DEV
         env:
-          IICS_POD_URL: https://dm-ap.informaticacloud.com
+          IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
           IICS_USERNAME: ${{ secrets.DEV_IICS_USER }}
           IICS_PASSWORD: ${{ secrets.DEV_IICS_PWD }}
         run: python scripts/infa_login.py
@@ -96,7 +96,7 @@ jobs:
 
       - name: Login to UAT
         env:
-          IICS_POD_URL: https://dm-ap.informaticacloud.com
+          IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
           IICS_USERNAME: ${{ secrets.UAT_IICS_USER }}
           IICS_PASSWORD: ${{ secrets.UAT_IICS_PWD }}
         run: python scripts/infa_login.py
@@ -131,7 +131,7 @@ jobs:
 
       - name: Login to PROD
         env:
-          IICS_POD_URL: https://dm-ap.informaticacloud.com
+          IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
           IICS_USERNAME: ${{ secrets.PROD_IICS_USER }}
           IICS_PASSWORD: ${{ secrets.PROD_IICS_PWD }}
         run: python scripts/infa_login.py
