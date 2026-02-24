@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os, sys, json, argparse
-from lib.infa_api import IICSApiClient
-from lib.my_logger import MyLogger
+from scripts.lib.infa_api import IICSApiClient
+from scripts.lib.my_logger import MyLogger
 
 def main():
     parser = argparse.ArgumentParser()
