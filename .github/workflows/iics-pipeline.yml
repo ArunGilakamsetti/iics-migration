@@ -1,0 +1,138 @@
+name: IICS Hybrid Migration
+
+on:
+  push:
+    branches: [dev, uat, prod]
+    paths: ['Explore/**']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, uat, prod]
+
+env:
+  IICS_LOGIN_URL: https://dm-us.informaticacloud.com
+  COMMIT_HASH: ${{ github.sha }}
+
+jobs:
+  export:
+    name: Export from DEV
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/dev' || github.event.inputs.environment == 'dev'
+    environment: development
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.10' }
+      - run: pip install -r requirements.txt
+
+      - name: Login to DEV
+        env:
+          IICS_POD_URL: https://na1.dm-us.informaticacloud.com
+          IICS_USERNAME: ${{ secrets.DEV_IICS_USER }}
+          IICS_PASSWORD: ${{ secrets.DEV_IICS_PWD }}
+        run: python scripts/infa_login.py
+
+      - name: Export project
+        run: |
+          python scripts/infa_export.py \
+            --project "Project_Alpha" \
+            --output exports/package_${{ github.sha }}.zip
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: iics-package
+          path: exports/package_${{ github.sha }}.zip
+
+      - name: Upload session info (for next jobs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-info
+          path: session_info.json
+
+  deploy-uat:
+    name: Deploy to UAT
+    runs-on: ubuntu-latest
+    needs: export
+    if: github.ref == 'refs/heads/uat' || github.event.inputs.environment == 'uat'
+    environment: uat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.10' }
+      - run: pip install -r requirements.txt
+
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: iics-package
+          path: downloads/
+
+      - name: Download session info
+        uses: actions/download-artifact@v4
+        with:
+          name: session-info
+          path: downloads/
+
+      - name: Login to UAT
+        env:
+          IICS_POD_URL: https://na1.dm-us.informaticacloud.com
+          IICS_USERNAME: ${{ secrets.UAT_IICS_USER }}
+          IICS_PASSWORD: ${{ secrets.UAT_IICS_PWD }}
+        run: python scripts/infa_login.py
+
+      - name: Import to UAT
+        run: |
+          python scripts/infa_import.py \
+            --package downloads/package_${{ github.sha }}.zip \
+            --config Explore/configs/uat_config.json \
+            --env uat
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-uat
+    if: github.ref == 'refs/heads/prod' || github.event.inputs.environment == 'prod'
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.10' }
+      - run: pip install -r requirements.txt
+
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: iics-package
+          path: downloads/
+
+      - name: Login to PROD
+        env:
+          IICS_POD_URL: https://na1.dm-us.informaticacloud.com
+          IICS_USERNAME: ${{ secrets.PROD_IICS_USER }}
+          IICS_PASSWORD: ${{ secrets.PROD_IICS_PWD }}
+        run: python scripts/infa_login.py
+
+      - name: Import to Production
+        run: |
+          python scripts/infa_import.py \
+            --package downloads/package_${{ github.sha }}.zip \
+            --config Explore/configs/prod_config.json \
+            --env prod
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            **IICS Deployment Package**
+            - Commit: ${{ github.sha }}
+            - Environment: Production
+          files: downloads/package_${{ github.sha }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
