@@ -20,6 +20,8 @@ jobs:
   export:
     name: Export from DEV
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     if: github.ref == 'refs/heads/dev' || github.event.inputs.environment == 'dev'
     environment: development
     steps:
@@ -56,6 +58,8 @@ jobs:
   deploy-uat:
     name: Deploy to UAT
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}    
     needs: export
     if: github.ref == 'refs/heads/uat' || github.event.inputs.environment == 'uat'
     environment: uat
@@ -94,6 +98,8 @@ jobs:
   deploy-prod:
     name: Deploy to Production
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}    
     needs: deploy-uat
     if: github.ref == 'refs/heads/prod' || github.event.inputs.environment == 'prod'
     environment:
