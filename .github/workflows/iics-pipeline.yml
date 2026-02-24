@@ -13,7 +13,7 @@ on:
         options: [dev, uat, prod]
 
 env:
-  IICS_LOGIN_URL: https://dm-us.informaticacloud.com
+  IICS_LOGIN_URL: https://dm-ap.informaticacloud.com
   COMMIT_HASH: ${{ github.sha }}
 
 jobs:
