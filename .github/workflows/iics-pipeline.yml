@@ -3,7 +3,7 @@ name: IICS Hybrid Migration (CLI)
 on:
   push:
     branches: [ dev, uat, prod ]
-    paths: [ 'Explore/**' ]          # Trigger only when IICS assets change
+    paths: [ 'Explore/**' ]
   workflow_dispatch:
     inputs:
       environment:
@@ -14,9 +14,9 @@ on:
         options: [ dev, uat, prod ]
 
 env:
-  IICS_REGION: ap                     # Asia Pacific region (from your login URL)
-  IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com   # Confirmed pod URL
-  PROJECT_PATH: Explore/Project_Alpha.Project              # Adjust to your project name
+  IICS_REGION: ap
+  IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
+  PROJECT_PATH: Explore/Project_Alpha.Project
 
 jobs:
   export:
@@ -25,15 +25,11 @@ jobs:
     if: github.ref == 'refs/heads/dev' || github.event.inputs.environment == 'dev'
     environment: development
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download IICS CLI (Linux)
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
-          chmod +x ./iics-cli/iics
-          ./iics-cli/iics version
-          tar -xzf iics.tar.gz
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
       - name: Export project from DEV
@@ -62,15 +58,11 @@ jobs:
     if: github.ref == 'refs/heads/uat' || github.event.inputs.environment == 'uat'
     environment: uat
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download IICS CLI (Linux)
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
-          chmod +x ./iics-cli/iics
-          ./iics-cli/iics version
-          tar -xzf iics.tar.gz
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
       - name: Download package from export job
@@ -97,15 +89,11 @@ jobs:
     if: github.ref == 'refs/heads/prod' || github.event.inputs.environment == 'prod'
     environment: production
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download IICS CLI (Linux)
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
-          chmod +x ./iics-cli/iics
-          ./iics-cli/iics version
-          tar -xzf iics.tar.gz
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
       - name: Download package from export job
