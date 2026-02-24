@@ -1,157 +1,133 @@
-name: IICS Hybrid Migration
+name: IICS Hybrid Migration (CLI)
 
 on:
   push:
-    branches: [dev, uat, prod]
-    paths: ['Explore/**']
+    branches: [ dev, uat, prod ]
+    paths: [ 'Explore/**' ]          # Trigger only when IICS assets change
   workflow_dispatch:
     inputs:
       environment:
         description: 'Target environment'
         required: true
+        default: 'dev'
         type: choice
-        options: [dev, uat, prod]
+        options: [ dev, uat, prod ]
 
 env:
-  IICS_LOGIN_URL: https://dm-ap.informaticacloud.com
-  COMMIT_HASH: ${{ github.sha }}
+  IICS_REGION: ap                     # Asia Pacific region (from your login URL)
+  IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com   # Confirmed pod URL
+  PROJECT_PATH: Explore/Project_Alpha.Project              # Adjust to your project name
 
 jobs:
   export:
     name: Export from DEV
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: ${{ github.workspace }}
     if: github.ref == 'refs/heads/dev' || github.event.inputs.environment == 'dev'
     environment: development
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with: { python-version: '3.10' }
-      - run: pip install -r requirements.txt
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Debug environment
+      - name: Download IICS CLI (Linux)
         run: |
-          echo "Current directory: $(pwd)"
-          echo "PYTHONPATH: $PYTHONPATH"
-          echo "Contents of scripts:"
-          ls -la scripts/
-          echo "Contents of scripts/lib:"
-          ls -la scripts/lib/
-          echo "Checking for __init__.py files:"
-          test -f scripts/__init__.py && echo "scripts/__init__.py exists" || echo "scripts/__init__.py MISSING"
-          test -f scripts/lib/__init__.py && echo "scripts/lib/__init__.py exists" || echo "scripts/lib/__init__.py MISSING"
-            
+          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.2/linux-amd64.tar.gz
+          tar -xzf iics.tar.gz
+          chmod +x iics
 
-      - name: Login to DEV
-        env:
-          IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
-          IICS_USERNAME: ${{ secrets.DEV_IICS_USER }}
-          IICS_PASSWORD: ${{ secrets.DEV_IICS_PWD }}
-        run: python scripts/infa_login.py
-
-      - name: Export project
+      - name: Export project from DEV
         run: |
-          python scripts/infa_export.py \
-            --project "Project_Alpha" \
-            --output exports/package_${{ github.sha }}.zip
+          ./iics export \
+            -n "DEV_Export_${{ github.sha }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_URL }} \
+            -u ${{ secrets.DEV_IICS_USER }} \
+            -p ${{ secrets.DEV_IICS_PWD }} \
+            -a "${{ env.PROJECT_PATH }}" \
+            -z exports/package_${{ github.sha }}.zip \
+            -s true
 
-      - name: Upload package
+      - name: Upload exported package
         uses: actions/upload-artifact@v4
         with:
           name: iics-package
           path: exports/package_${{ github.sha }}.zip
-
-      - name: Upload session info (for next jobs)
-        uses: actions/upload-artifact@v4
-        with:
-          name: session-info
-          path: session_info.json
+          retention-days: 30
 
   deploy-uat:
     name: Deploy to UAT
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: ${{ github.workspace }}    
     needs: export
     if: github.ref == 'refs/heads/uat' || github.event.inputs.environment == 'uat'
     environment: uat
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with: { python-version: '3.10' }
-      - run: pip install -r requirements.txt
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Download package
+      - name: Download IICS CLI (Linux)
+        run: |
+          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.2/linux-amd64.tar.gz
+          tar -xzf iics.tar.gz
+          chmod +x iics
+
+      - name: Download package from export job
         uses: actions/download-artifact@v4
         with:
           name: iics-package
-          path: downloads/
-
-      - name: Download session info
-        uses: actions/download-artifact@v4
-        with:
-          name: session-info
-          path: downloads/
-
-      - name: Login to UAT
-        env:
-          IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
-          IICS_USERNAME: ${{ secrets.UAT_IICS_USER }}
-          IICS_PASSWORD: ${{ secrets.UAT_IICS_PWD }}
-        run: python scripts/infa_login.py
+          path: ./
 
       - name: Import to UAT
         run: |
-          python scripts/infa_import.py \
-            --package downloads/package_${{ github.sha }}.zip \
-            --config Explore/configs/uat_config.json \
-            --env uat
+          ./iics import \
+            -n "UAT_Import_${{ github.sha }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_URL }} \
+            -u ${{ secrets.UAT_IICS_USER }} \
+            -p ${{ secrets.UAT_IICS_PWD }} \
+            -z package_${{ github.sha }}.zip \
+            -s true
 
   deploy-prod:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: ${{ github.workspace }}    
     needs: deploy-uat
     if: github.ref == 'refs/heads/prod' || github.event.inputs.environment == 'prod'
-    environment:
-      name: production
+    environment: production
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with: { python-version: '3.10' }
-      - run: pip install -r requirements.txt
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Download package
+      - name: Download IICS CLI (Linux)
+        run: |
+          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.2/linux-amd64.tar.gz
+          tar -xzf iics.tar.gz
+          chmod +x iics
+
+      - name: Download package from export job
         uses: actions/download-artifact@v4
         with:
           name: iics-package
-          path: downloads/
-
-      - name: Login to PROD
-        env:
-          IICS_POD_URL: https://apse1.dm-ap.informaticacloud.com
-          IICS_USERNAME: ${{ secrets.PROD_IICS_USER }}
-          IICS_PASSWORD: ${{ secrets.PROD_IICS_PWD }}
-        run: python scripts/infa_login.py
+          path: ./
 
       - name: Import to Production
         run: |
-          python scripts/infa_import.py \
-            --package downloads/package_${{ github.sha }}.zip \
-            --config Explore/configs/prod_config.json \
-            --env prod
+          ./iics import \
+            -n "PROD_Import_${{ github.sha }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_URL }} \
+            -u ${{ secrets.PROD_IICS_USER }} \
+            -p ${{ secrets.PROD_IICS_PWD }} \
+            -z package_${{ github.sha }}.zip \
+            -s true
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (optional)
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ github.run_number }}
           name: Release v${{ github.run_number }}
           body: |
-            **IICS Deployment Package**
+            **IICS Production Deployment**
             - Commit: ${{ github.sha }}
-            - Environment: Production
-          files: downloads/package_${{ github.sha }}.zip
+            - Package: package_${{ github.sha }}.zip
+          files: package_${{ github.sha }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
