@@ -30,7 +30,9 @@ jobs:
 
       - name: Download IICS CLI (Linux)
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.2/linux-amd64.tar.gz
+          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x ./iics-cli/iics
+          ./iics-cli/iics version
           tar -xzf iics.tar.gz
           chmod +x iics
 
@@ -65,7 +67,9 @@ jobs:
 
       - name: Download IICS CLI (Linux)
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.2/linux-amd64.tar.gz
+          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x ./iics-cli/iics
+          ./iics-cli/iics version
           tar -xzf iics.tar.gz
           chmod +x iics
 
@@ -98,7 +102,9 @@ jobs:
 
       - name: Download IICS CLI (Linux)
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.2/linux-amd64.tar.gz
+          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x ./iics-cli/iics
+          ./iics-cli/iics version
           tar -xzf iics.tar.gz
           chmod +x iics
 
