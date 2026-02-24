@@ -15,7 +15,7 @@ on:
 
 env:
   IICS_REGION: ap                                # Your region (us, eu, ap, etc.)
-  IICS_POD_HOST: apse1.dm-ap.informaticacloud.com  # Hostname only – no https://
+  IICS_POD_HOST: dm-ap.informaticacloud.com # Hostname only – no https://
   PROJECT_PATH: Explore/Project_Alpha.Project    # Adjust to your actual project path
 
 jobs:
