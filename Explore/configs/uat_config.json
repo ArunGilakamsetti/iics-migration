@@ -1,5 +1,5 @@
 {
-  "connectionMapping": [
+  "connectionOverrides": [
     {
       "sourceConnectionName": "Sample Salesforce Connection",
       "targetConnectionName": "Sample Salesforce Connection UAT"
@@ -8,5 +8,6 @@
       "sourceConnectionName": "DEV_Target_Connection",
       "targetConnectionName": "UAT_Target_Connection"
     }
-  ]
+  ],
+  "runtimeEnvironmentOverride": "UAT_Agent_Name"
 }
