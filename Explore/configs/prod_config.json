@@ -1,10 +1,13 @@
 {
-    "environment": "prod",
-    "base_url": "https://dm-ap.informaticacloud.com",
-    "pod_url": "https://dm-ap.informaticacloud.com/",
-    "connections": {
-        "source_db": "PROD_SOURCE_CONN_ID",
-        "target_db": "PROD_TARGET_CONN_ID"
+  "connectionOverrides": [
+    {
+      "sourceName": "Sample Salesforce Connection",
+      "targetName": "Sample Salesforce Connection PROD"
     },
-    "runtime_environment": "PROD_AGENT_ID"
+    {
+      "sourceName": "DEV_Target_Connection",
+      "targetName": "PROD_Target_Connection"
+    }
+  ],
+  "runtimeEnvironmentOverride": "PROD_Agent_Name"
 }
