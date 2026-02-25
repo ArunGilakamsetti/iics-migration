@@ -1,0 +1,10 @@
+{
+    "environment": "prod",
+    "base_url": "https://dm-ap.informaticacloud.com",
+    "pod_url": "https://dm-ap.informaticacloud.com/",
+    "connections": {
+        "source_db": "PROD_SOURCE_CONN_ID",
+        "target_db": "PROD_TARGET_CONN_ID"
+    },
+    "runtime_environment": "PROD_AGENT_ID"
+}
