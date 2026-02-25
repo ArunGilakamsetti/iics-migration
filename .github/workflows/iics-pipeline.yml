@@ -81,7 +81,7 @@ jobs:
             -u ${{ secrets.UAT_IICS_USER }} \
             -p ${{ secrets.UAT_IICS_PWD }} \
             -z package_${{ github.sha }}.zip \
-            -o Explore/configs/uat_config.json \
+            --connectionMappingFile Explore/configs/uat_config.json \
             -s true
 
   deploy-prod:
