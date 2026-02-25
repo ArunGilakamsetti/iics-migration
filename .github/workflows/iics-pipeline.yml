@@ -14,15 +14,18 @@ on:
         options: [ dev, uat, prod ]
 
 env:
-  IICS_REGION: ap                                # Your region (us, eu, ap, etc.)
-  IICS_POD_HOST: dm-ap.informaticacloud.com # Hostname only – no https://
-  PROJECT_PATH: Explore/Project_Alpha.Project    # Adjust to your actual project path
+  IICS_REGION: ap
+  IICS_POD_HOST: dm-ap.informaticacloud.com
+  PROJECT_PATH: Explore/Project_Alpha.Project   # Adjust as needed
 
 jobs:
   export:
     name: Export from DEV
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/dev' || github.event.inputs.environment == 'dev'
+    # Run on:
+    # - push to dev branch
+    # - any manual dispatch (workflow_dispatch)
+    if: github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch'
     environment: development
     steps:
       - name: Checkout code
@@ -59,18 +62,18 @@ jobs:
     name: Deploy to UAT
     runs-on: ubuntu-latest
     needs: export
+    # Run on:
+    # - push to uat branch
+    # - manual dispatch with environment 'uat'
     if: github.ref == 'refs/heads/uat' || github.event.inputs.environment == 'uat'
     environment: uat
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download IICS CLI (Linux)
+      - name: Download IICS CLI
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
-      - name: Download package from export job
+      - name: Download package
         uses: actions/download-artifact@v4
         with:
           name: iics-package
@@ -90,19 +93,19 @@ jobs:
   deploy-prod:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: deploy-uat
+    needs: export
+    # Run on:
+    # - push to prod branch
+    # - manual dispatch with environment 'prod'
     if: github.ref == 'refs/heads/prod' || github.event.inputs.environment == 'prod'
     environment: production
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download IICS CLI (Linux)
+      - name: Download IICS CLI
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
-      - name: Download package from export job
+      - name: Download package
         uses: actions/download-artifact@v4
         with:
           name: iics-package
