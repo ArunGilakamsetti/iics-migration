@@ -16,6 +16,7 @@ on:
 env:
   IICS_REGION: ap
   IICS_POD_HOST: dm-ap.informaticacloud.com
+  # Ensure this matches the exact folder/project name in your IICS Explore tab
   PROJECT_PATH: Explore/Project_Alpha.Project 
 
 jobs:
@@ -58,7 +59,7 @@ jobs:
     if: github.ref == 'refs/heads/uat' || github.event.inputs.environment == 'uat'
     environment: uat
     steps:
-      - uses: actions/checkout@v4 # Needed for mapping script and configs
+      - uses: actions/checkout@v4
 
       - name: Download IICS CLI
         run: |
@@ -75,8 +76,15 @@ jobs:
         run: |
           mkdir -p workspace_uat
           ./iics extract -z package_${{ github.sha }}.zip -w workspace_uat
+          
+          # Inject mappings into the JSON files
           python3 apply_mappings.py Explore/configs/uat_config.json workspace_uat
-          ./iics package -w workspace_uat -z package_uat_final.zip
+          
+          # Pack it back up - specifying the artifact (-a) is mandatory here
+          ./iics package \
+            -w workspace_uat \
+            -a "${{ env.PROJECT_PATH }}" \
+            -z package_uat_final.zip
 
       - name: Import to UAT
         run: |
@@ -113,8 +121,13 @@ jobs:
         run: |
           mkdir -p workspace_prod
           ./iics extract -z package_${{ github.sha }}.zip -w workspace_prod
+          
           python3 apply_mappings.py Explore/configs/prod_config.json workspace_prod
-          ./iics package -w workspace_prod -z package_prod_final.zip
+          
+          ./iics package \
+            -w workspace_prod \
+            -a "${{ env.PROJECT_PATH }}" \
+            -z package_prod_final.zip
 
       - name: Import to Production
         run: |
