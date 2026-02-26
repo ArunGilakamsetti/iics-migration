@@ -1,10 +1,23 @@
 import json, subprocess, os, zipfile, sys
 
 def load_dev_manifest(package_file):
-    """Load DEV package manifest and return set of (name, type)."""
+    """Load DEV package manifest from exportMetadata.v2.json."""
     with zipfile.ZipFile(package_file, 'r') as z:
-        manifest = json.loads(z.read('objects.json'))
-    return { (obj['name'], obj['type']) for obj in manifest['objects'] }
+        files = z.namelist()
+        print("Package contents:", files)
+
+        # Look specifically for exportMetadata.v2.json
+        if "exportMetadata.v2.json" not in files:
+            raise FileNotFoundError("exportMetadata.v2.json not found in package zip")
+
+        with z.open("exportMetadata.v2.json") as f:
+            manifest = json.load(f)
+
+    # Extract exportedObjects list
+    if "exportedObjects" in manifest:
+        return { (obj['objectName'], obj['objectType']) for obj in manifest['exportedObjects'] }
+    else:
+        raise KeyError("exportMetadata.v2.json does not contain 'exportedObjects'")
 
 def load_target_objects(file):
     """Load target environment objects from REST API output."""
@@ -29,7 +42,7 @@ if __name__ == "__main__":
     env = os.environ["DEPLOY_ENV"]
     dry_run = "--check-only" in sys.argv
 
-    # Load DEV manifest from the prepared package file
+    # Load DEV manifest from prepared package
     package_file = f"package_{env}_final.zip"
     dev_objects = load_dev_manifest(package_file)
 
@@ -40,7 +53,6 @@ if __name__ == "__main__":
     to_delete = target_objects - dev_objects
 
     for name, obj_type in to_delete:
-        # Skip adhoc folder
         if name.startswith("Adhoc_Activities/"):
             print(f"Skipping adhoc object: {name}")
             continue
