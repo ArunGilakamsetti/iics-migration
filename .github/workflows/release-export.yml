@@ -1,0 +1,53 @@
+name: Create IICS Release from Dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.2.3)'
+        required: true
+        type: string
+      project_path:
+        description: 'Project path in IICS'
+        required: false
+        default: 'Explore/Project_Alpha.Project'
+
+env:
+  IICS_REGION: ap
+  IICS_POD_HOST: dm-ap.informaticacloud.com
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Export project
+        run: |
+          mkdir -p exports
+          ./iics export \
+            -n "Export_${{ github.event.inputs.version }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets.DEV_IICS_USER }} \
+            -p ${{ secrets.DEV_IICS_PWD }} \
+            -a "${{ github.event.inputs.project_path }}" \
+            -z exports/package_${{ github.event.inputs.version }}.zip \
+            -s true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          files: exports/package_${{ github.event.inputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
