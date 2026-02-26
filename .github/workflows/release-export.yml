@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       project_path:
-        description: 'Project path in IICS'
+        description: 'Project path in IICS (default: Explore/Project_Alpha.Project)'
         required: false
         default: 'Explore/Project_Alpha.Project'
 
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: development
     permissions:
-      contents: write
+      contents: write   # to create GitHub Release and upload assets
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +30,7 @@ jobs:
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
-      - name: Export project
+      - name: Export project from DEV
         run: |
           mkdir -p exports
           ./iics export \
@@ -48,6 +48,10 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: Release ${{ github.event.inputs.version }}
+          body: |
+            **IICS Assets exported from Dev**
+            - Project: ${{ github.event.inputs.project_path }}
+            - Triggered by: ${{ github.actor }}
           files: exports/package_${{ github.event.inputs.version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

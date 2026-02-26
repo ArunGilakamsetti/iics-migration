@@ -1,5 +1,8 @@
 name: Deploy IICS Release to Environment
 
+# This will make the run name show the selected environment, e.g., "Deploy IICS Release to uat"
+run-name: Deploy IICS Release to ${{ inputs.environment }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -28,7 +31,6 @@ jobs:
   prepare:
     name: Prepare package for ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
-    # No environment needed here because this job doesn't use target secrets
     steps:
       - uses: actions/checkout@v4
 
