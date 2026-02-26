@@ -40,6 +40,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          # Use caching to speed up subsequent runs
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
 
       - name: Download IICS CLI
         run: |
@@ -55,13 +60,9 @@ jobs:
         run: |
           mkdir -p workspace_deploy
           ./iics extract -z package.zip -w workspace_deploy
-          
-          # This script handles assets, manifest, and hidden metadata sidecars
           python3 Explore/scripts/apply_mappings.py \
             Explore/configs/${{ github.event.inputs.environment }}_config.json \
             workspace_deploy
-          
-          # Re-package with fresh checksums (calculated by the CLI)
           ./iics package \
             -w workspace_deploy \
             -a "${{ github.event.inputs.project_path }}" \
@@ -119,6 +120,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
 
       - name: Download IICS CLI
         run: |
@@ -134,16 +139,10 @@ jobs:
         run: |
           mkdir -p workspace_rollback
           ./iics extract -z rollback_package.zip -w workspace_rollback
-          
           python3 Explore/scripts/apply_mappings.py \
             Explore/configs/${{ github.event.inputs.environment }}_config.json \
             workspace_rollback
-          
-          ./iics package \
-            -w workspace_rollback \
-            -a "${{ github.event.inputs.project_path }}" \
-            -z rollback_final.zip
-          
+          ./iics package -w workspace_rollback -a "${{ github.event.inputs.project_path }}" -z rollback_final.zip
           ./iics import \
             -n "ROLLBACK_to_${{ github.event.inputs.previous_stable_version }}" \
             -r ${{ env.IICS_REGION }} \
@@ -168,6 +167,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
 
       - name: Download Workspace Metadata
         uses: actions/download-artifact@v4
@@ -178,8 +181,6 @@ jobs:
       - name: Run Orphan Deletion Script
         run: |
           PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||')
-          
-          # Metadata resides in artifacts/workspace_deploy after download
           python3 Explore/scripts/auto_cleanup.py \
             "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
             "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
