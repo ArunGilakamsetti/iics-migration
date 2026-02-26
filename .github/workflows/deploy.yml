@@ -107,5 +107,4 @@ jobs:
             -u ${{ secrets[format('{0}_IICS_USER', inputs.environment)] }} \
             -p ${{ secrets[format('{0}_IICS_PWD', inputs.environment)] }} \
             -z package_${{ inputs.environment }}_final.zip \
-            --import-strategy REPLACE \
             -s true
