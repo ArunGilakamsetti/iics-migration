@@ -83,8 +83,7 @@ jobs:
             --base uat \
             --head dev \
             --title "Auto PR: Promote changes from dev to uat" \
-            --body "This PR was automatically created after a successful export from the dev branch." \
-            --label "auto-pr,promotion"
+            --body "This PR was automatically created after a successful export from the dev branch."
 
   deploy-uat:
     name: Deploy to UAT
