@@ -7,47 +7,65 @@ def get_iics_session(user, pwd, pod_host):
     login_url = f"https://{pod_host}/saas/public/core/v3/login"
     res = requests.post(login_url, json={"username": user, "password": pwd})
     if res.status_code != 200:
-        print("❌ Login Failed"); sys.exit(1)
-    print("✅ Login Successful.")
+        print(f"❌ Login Failed: {res.text}"); sys.exit(1)
+    
     data = res.json()
-    return data['userInfo']['sessionId'], data['userInfo']['baseUrl']
+    # v3 uses baseApiUrl; we fall back to sessionId for the headers
+    session_id = data['userInfo']['sessionId']
+    
+    # Standardizing the base URL for v2/v3 cross-calls
+    base_url = data['userInfo'].get('baseApiUrl')
+    if not base_url:
+        # Fallback for older POD responses
+        base_url = f"https://{pod_host}/saas"
+        
+    print(f"✅ Login Successful. POD: {base_url}")
+    return session_id, base_url
 
 def get_remote_assets(session_id, base_url, project_name):
-    # We use a broad search filter to find anything in the target project path
+    # Search uses the v2 mdata API
     search_url = f"{base_url}/api/v2/mdata/search"
     headers = {"icSessionId": session_id, "Accept": "application/json"}
     
-    # IICS locations often look like "Project_Alpha" or "Project_Alpha/Folder"
+    # Query for assets exactly in this project or subfolders
     params = {"q": f"location:'{project_name}' OR location:'{project_name}/*'"}
     res = requests.get(search_url, headers=headers, params=params)
     
     if res.status_code != 200:
-        print(f"⚠️ Search failed with status {res.status_code}")
+        print(f"⚠️ Search failed: {res.text}")
         return {}
 
     remote_assets = {}
     for asset in res.json():
-        # Map asset name + type to the object ID
-        key = f"{asset['name']}.{asset['type']}"
+        # Map asset name + type to ID (e.g., "m_orders.MTT")
+        asset_type = asset.get('type', 'UNKNOWN')
+        asset_name = asset.get('name', 'UNKNOWN')
+        key = f"{asset_name}.{asset_type}"
         remote_assets[key] = asset['id']
     
     return remote_assets
 
 def get_local_assets(workspace_path):
     local_assets = set()
+    if not os.path.exists(workspace_path):
+        print(f"⚠️ Workspace path not found: {workspace_path}")
+        return local_assets
+
     for root, _, files in os.walk(workspace_path):
         for file in files:
-            # Skip hidden metadata sidecars and folder/project definitions
-            if file.startswith(".") or file.endswith((".Folder.json", ".Project.json")):
+            # Ignore hidden files, Folders, and Projects
+            if file.startswith(".") or ".Folder.json" in file or ".Project.json" in file:
                 continue
             
-            # Extract Name.Type from filename (e.g., MyMapping.DTEMPLATE.zip -> MyMapping.DTEMPLATE)
+            # Extract name and type: "Mapping_Name.DTEMPLATE.zip" -> "Mapping_Name.DTEMPLATE"
             parts = file.split('.')
             if len(parts) >= 2:
+                # We normalize by taking the first two parts
                 local_assets.add(f"{parts[0]}.{parts[1]}")
     return local_assets
 
 def delete_asset(session_id, base_url, asset_id, asset_key):
+    # Delete uses v2 mdata API
     delete_url = f"{base_url}/api/v2/mdata/delete/{asset_id}"
     headers = {"icSessionId": session_id, "Accept": "application/json"}
     res = requests.post(delete_url, headers=headers)
@@ -57,6 +75,10 @@ def delete_asset(session_id, base_url, asset_id, asset_key):
         print(f"❌ Failed to delete {asset_key}: {res.text}")
 
 def main():
+    if len(sys.argv) < 5:
+        print("Usage: python3 auto_cleanup.py <user> <pwd> <project> <path>")
+        sys.exit(1)
+
     user, pwd, project_name, workspace_path = sys.argv[1:5]
     pod_host = os.getenv("IICS_POD_HOST", "dm-ap.informaticacloud.com")
     
@@ -71,14 +93,15 @@ def main():
     
     orphans_found = 0
     for asset_key, asset_id in remote_assets.items():
+        # Only delete if it exists in IICS but NOT in Git
         if asset_key not in local_assets:
-            # Double check: we don't want to delete the project or folders themselves
-            if ".Folder" in asset_key or ".Project" in asset_key:
+            # Safety check: Don't delete the project or connection objects unless desired
+            if ".Folder" in asset_key or ".Project" in asset_key or ".Connection" in asset_key:
                 continue
             delete_asset(session_id, base_url, asset_id, asset_key)
             orphans_found += 1
             
-    print(f"✨ Done. Deleted {orphans_found} orphans.")
+    print(f"✨ Done. Total orphans deleted: {orphans_found}")
 
 if __name__ == "__main__":
     main()

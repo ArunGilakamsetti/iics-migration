@@ -179,10 +179,10 @@ jobs:
           path: artifacts
 
       - name: Run Orphan Deletion Script
+        env:
+          IICS_POD_HOST: ${{ env.IICS_POD_HOST }}
         run: |
-          # Removes 'Explore/' and '.Project'
           CLEAN_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||; s|\.Project$||')
-          
           python3 Explore/scripts/auto_cleanup.py \
             "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
             "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
