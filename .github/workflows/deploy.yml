@@ -1,6 +1,5 @@
 name: Deploy IICS Release to Environment
 
-# This will make the run name show the selected environment, e.g., "Deploy IICS Release to uat"
 run-name: Deploy IICS Release to ${{ inputs.environment }}
 
 on:
@@ -49,7 +48,7 @@ jobs:
         run: |
           mkdir -p workspace_${{ github.event.inputs.environment }}
           ./iics extract -z package.zip -w workspace_${{ github.event.inputs.environment }}
-          python3 apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
+          python3 Explore/scripts/apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
           ./iics package \
             -w workspace_${{ github.event.inputs.environment }} \
             -a "${{ github.event.inputs.project_path }}" \
@@ -79,6 +78,19 @@ jobs:
         with:
           name: package-${{ github.event.inputs.environment }}-${{ github.event.inputs.version }}
           path: ./
+
+      - name: List target org objects
+        run: |
+          ./iics listObjects \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
+            -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
+            -o target_objects.json
+
+      - name: Auto-cleanup old objects (excluding adhoc folder)
+        run: |
+          python3 Explore/scripts/auto_cleanup.py
 
       - name: Import to ${{ github.event.inputs.environment }}
         run: |
