@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p workspace_${{ github.event.inputs.environment }}
           ./iics extract -z package.zip -w workspace_${{ github.event.inputs.environment }}
-          python3 Explore/scripts/apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
+          python3 apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
           ./iics package \
             -w workspace_${{ github.event.inputs.environment }} \
             -a "${{ github.event.inputs.project_path }}" \
@@ -82,14 +82,8 @@ jobs:
 
       - name: Fetch target org objects
         run: |
-          SESSION_ID=$(./iics login \
-            -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
-            -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
-            -r ${{ env.IICS_REGION }} \
-            --podHostName ${{ env.IICS_POD_HOST }})
-
           curl -s -X GET "https://${{ env.IICS_POD_HOST }}/public/core/v3/objects" \
-            -H "icSessionId: $SESSION_ID" \
+            -u "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}:${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
             -o target_objects.json
 
       - name: Auto-cleanup old objects (excluding adhoc folder)

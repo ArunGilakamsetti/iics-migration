@@ -3,7 +3,7 @@ import json, subprocess, os, zipfile, sys
 def load_dev_manifest(package_file):
     """Load DEV package manifest and return set of (name, type)."""
     with zipfile.ZipFile(package_file, 'r') as z:
-        manifest = json.loads(z.read('manifest.json'))
+        manifest = json.loads(z.read('objects.json'))
     return { (obj['name'], obj['type']) for obj in manifest['objects'] }
 
 def load_target_objects(file):
