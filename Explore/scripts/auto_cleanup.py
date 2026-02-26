@@ -1,26 +1,43 @@
 import requests
 import os
 import sys
+from datetime import datetime
 
-# List of common IICS extensions to strip from filenames
 IICS_EXTENSIONS = [
     ".MTT.json", ".DTEMPLATE.json", ".Connection.json", 
     ".WORKFLOW.json", ".DSS.json", ".DMASK.json", ".AI_SERVICE_CONNECTOR.json"
 ]
 
 def auto_cleanup(user, pwd, project_name, workspace_dir):
-    # 1. Login Logic
-    login_url = "https://dm-ap.informaticacloud.com/saas/api/core/v3/login"
-    login_res = requests.post(login_url, json={"username": user, "password": pwd})
-    if login_res.status_code != 200:
-        print("Login failed.")
+    log_entries = [f"--- IICS Cleanup Audit: {datetime.now()} ---"]
+    
+    # 1. Login via v2 to get the correct Pod URL (Base URL)
+    # The 'ma' (Multi-tenant Administrator) URL is the global entry point
+    login_url = "https://dm-ap.informaticacloud.com/ma/api/v2/user/login"
+    
+    try:
+        login_res = requests.post(login_url, json={"username": user, "password": pwd})
+        if login_res.status_code != 200:
+            print(f"Login failed: {login_res.text}")
+            sys.exit(1)
+
+        auth_data = login_res.json()
+        session_id = auth_data["icSessionId"]
+        # Convert the serverUrl to the v3 Base API URL
+        # Example: https://na1.dm-us.informaticacloud.com/saas -> https://na1.dm-us.informaticacloud.com/saas/public/core/v3
+        v3_base_url = f"{auth_data['serverUrl']}/public/core/v3"
+        
+        headers = {
+            "INFA-SESSION-ID": session_id,
+            "Accept": "application/json"
+        }
+        print("✅ Login Successful. Discovered Pod URL.")
+        
+    except Exception as e:
+        print(f"Connection Error: {str(e)}")
         sys.exit(1)
 
-    auth_data = login_res.json()
-    base_url = auth_data["userInfo"]["baseApiUrl"]
-    headers = {"INFA-SESSION-ID": auth_data["userInfo"]["sessionId"]}
-
-    # 2. Build local asset list with better parsing
+    # 2. Build local asset list
     assets_to_keep = set()
     for root, _, files in os.walk(workspace_dir):
         for f in files:
@@ -33,28 +50,34 @@ def auto_cleanup(user, pwd, project_name, workspace_dir):
                 assets_to_keep.add(clean_name)
 
     # 3. Fetch Remote Assets
-    query = f"location=='{project_name}'"
-    lookup_url = f"{base_url}/public/core/v3/objects?q={query}"
+    # We use double quotes around project names in case they have spaces
+    lookup_url = f"{v3_base_url}/objects?q=location=='{project_name}'"
     remote_res = requests.get(lookup_url, headers=headers)
+    
+    if remote_res.status_code != 200:
+        print(f"Failed to fetch objects: {remote_res.text}")
+        sys.exit(1)
+        
     remote_objects = remote_res.json().get("objects", [])
 
-    # 4. Filtered Delete
-    print(f"Checking for orphans in {project_name}...")
+    # 4. Sync Logic
     for obj in remote_objects:
-        # SAFETY: Never delete Folders or Connections automatically unless sure
         if obj["type"] == "Folder":
             continue
             
-        # Optional: Skip deleting connections to be safe
-        # if obj["type"] == "Connection": continue
-
         if obj["name"] not in assets_to_keep:
-            print(f"🗑️ Deleting {obj['type']}: {obj['name']}...")
-            del_res = requests.delete(f"{base_url}/public/core/v3/objects/{obj['id']}", headers=headers)
+            print(f"🗑️ Found Orphan: {obj['name']} ({obj['type']})")
+            del_url = f"{v3_base_url}/objects/{obj['id']}"
+            del_res = requests.delete(del_url, headers=headers)
+            
             if del_res.status_code == 204:
-                print(f"✅ Success.")
+                log_entries.append(f"SUCCESS: Deleted {obj['name']}")
             else:
-                print(f"❌ Failed (Status {del_res.status_code}). Check for active dependencies.")
+                log_entries.append(f"FAILED: {obj['name']} - Status {del_res.status_code}")
+
+    with open("cleanup_audit.log", "w") as f:
+        f.write("\n".join(log_entries))
+    print("Cleanup step completed.")
 
 if __name__ == "__main__":
     auto_cleanup(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
