@@ -42,7 +42,7 @@ jobs:
         run: |
           mkdir -p workspace_${{ inputs.environment }}
           ./iics extract -z package.zip -w workspace_${{ inputs.environment }}
-          python3 apply_mappings.py Explore/configs/${{ inputs.environment }}_config.json workspace_${{ inputs.environment }}
+          python3 Explore/scripts/apply_mappings.py Explore/configs/${{ inputs.environment }}_config.json workspace_${{ inputs.environment }}
           ./iics package \
             -w workspace_${{ inputs.environment }} \
             -a "${{ inputs.project_path }}" \
@@ -73,7 +73,7 @@ jobs:
           path: ./
       - name: Run cleanup script
         run: |
-          python .github/scripts/cleanup_target.py \
+          python Explore/scripts/cleanup_target.py \
             --username "${{ secrets[format('{0}_IICS_USER', inputs.environment)] }}" \
             --password "${{ secrets[format('{0}_IICS_PWD', inputs.environment)] }}" \
             --package "package_${{ inputs.environment }}_final.zip" \
