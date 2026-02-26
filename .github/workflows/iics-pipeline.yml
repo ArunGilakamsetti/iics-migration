@@ -16,8 +16,7 @@ on:
 env:
   IICS_REGION: ap
   IICS_POD_HOST: dm-ap.informaticacloud.com
-  # Ensure this matches the exact folder/project name in your IICS Explore tab
-  PROJECT_PATH: Explore/Project_Alpha.Project 
+  PROJECT_PATH: Explore/Project_Alpha.Project
 
 jobs:
   export:
@@ -52,6 +51,40 @@ jobs:
           name: iics-package
           path: exports/package_${{ github.sha }}.zip
 
+  # --- NEW JOB: Auto‑create PR from dev → uat after successful export ---
+  create-pr-uat:
+    name: Create PR dev → uat
+    runs-on: ubuntu-latest
+    needs: export
+    if: github.ref == 'refs/heads/dev'   # Only run on pushes to dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for existing PR from dev to uat
+        id: check_pr
+        env:
+          GH_TOKEN: ${{ secrets.PAT_FOR_PR }}   # Use a PAT to allow triggering other workflows
+        run: |
+          # List open PRs from dev to uat
+          PR_COUNT=$(gh pr list --head dev --base uat --state open --json number --jq 'length')
+          if [ "$PR_COUNT" -gt 0 ]; then
+            echo "PR already exists. Skipping creation."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.check_pr.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_FOR_PR }}
+        run: |
+          gh pr create \
+            --base uat \
+            --head dev \
+            --title "Auto PR: Promote changes from dev to uat" \
+            --body "This PR was automatically created after a successful export from the dev branch."
+
   deploy-uat:
     name: Deploy to UAT
     runs-on: ubuntu-latest
@@ -76,11 +109,7 @@ jobs:
         run: |
           mkdir -p workspace_uat
           ./iics extract -z package_${{ github.sha }}.zip -w workspace_uat
-          
-          # Inject mappings into the JSON files
           python3 apply_mappings.py Explore/configs/uat_config.json workspace_uat
-          
-          # Pack it back up - specifying the artifact (-a) is mandatory here
           ./iics package \
             -w workspace_uat \
             -a "${{ env.PROJECT_PATH }}" \
@@ -105,6 +134,8 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download IICS CLI
         run: |
@@ -121,9 +152,7 @@ jobs:
         run: |
           mkdir -p workspace_prod
           ./iics extract -z package_${{ github.sha }}.zip -w workspace_prod
-          
           python3 apply_mappings.py Explore/configs/prod_config.json workspace_prod
-          
           ./iics package \
             -w workspace_prod \
             -a "${{ env.PROJECT_PATH }}" \
@@ -140,12 +169,29 @@ jobs:
             -z package_prod_final.zip \
             -s true
 
+      - name: Bump version and create tag
+        id: bump
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_branches: prod
+          default_bump: patch
+          tag_prefix: v
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         if: success()
         with:
-          tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
+          tag_name: ${{ steps.bump.outputs.new_tag }}
+          name: Release ${{ steps.bump.outputs.new_tag }}
+          body: |
+            **IICS Production Deployment**
+            - Commit: ${{ github.sha }}
+            - Package: package_prod_final.zip
+            
+            **What's Changed:**
+            ${{ steps.bump.outputs.changelog }}
           files: package_prod_final.zip
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
