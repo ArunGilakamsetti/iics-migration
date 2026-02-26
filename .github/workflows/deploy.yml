@@ -20,7 +20,8 @@ on:
 
 env:
   IICS_REGION: ap
-  IICS_POD_HOST: dm-ap.informaticacloud.com
+  IICS_POD_HOST: dm-ap.informaticacloud.com   # Login host
+  # Note: The actual pod host for API calls is passed separately
 
 jobs:
   prepare:
@@ -41,7 +42,7 @@ jobs:
         run: |
           mkdir -p workspace_${{ inputs.environment }}
           ./iics extract -z package.zip -w workspace_${{ inputs.environment }}
-          python3 Explore/scripts/apply_mappings.py Explore/configs/${{ inputs.environment }}_config.json workspace_${{ inputs.environment }}
+          python3 apply_mappings.py Explore/configs/${{ inputs.environment }}_config.json workspace_${{ inputs.environment }}
           ./iics package \
             -w workspace_${{ inputs.environment }} \
             -a "${{ inputs.project_path }}" \
@@ -52,7 +53,6 @@ jobs:
           name: package-${{ inputs.environment }}-${{ inputs.version }}
           path: package_${{ inputs.environment }}_final.zip
 
-  # 🔥 NEW: Cleanup job – runs after prepare, before import
   cleanup:
     name: Cleanup ${{ inputs.environment }} (remove obsolete objects)
     runs-on: ubuntu-latest
@@ -73,15 +73,18 @@ jobs:
           path: ./
       - name: Run cleanup script
         run: |
-          python Explore/scripts/cleanup_target.py \
+          python .github/scripts/cleanup_target.py \
             --username "${{ secrets[format('{0}_IICS_USER', inputs.environment)] }}" \
             --password "${{ secrets[format('{0}_IICS_PWD', inputs.environment)] }}" \
-            --package "package_${{ inputs.environment }}_final.zip"
+            --package "package_${{ inputs.environment }}_final.zip" \
+            --host "apse1.dm-ap.informaticacloud.com"   # Replace with your actual pod host
+        # If you have a variable for the pod host, use it instead of hardcoding:
+        # --host "${{ secrets.POD_HOST }}"
 
   import:
     name: Import to ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    needs: cleanup   # was: needs: prepare
+    needs: cleanup
     environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
