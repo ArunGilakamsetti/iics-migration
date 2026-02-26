@@ -84,7 +84,12 @@ jobs:
         run: |
           curl -s -X GET "https://${{ env.IICS_POD_HOST }}/public/core/v3/objects" \
             -u "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}:${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
             -o target_objects.json
+
+          echo "Fetched target_objects.json:"
+          cat target_objects.json
 
       - name: Auto-cleanup old objects (excluding adhoc folder)
         run: |
