@@ -170,7 +170,12 @@ jobs:
           cache: 'pip'
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        run: pip install requests
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
 
       - name: Download Workspace Metadata
         uses: actions/download-artifact@v4
@@ -180,13 +185,14 @@ jobs:
 
       - name: Run Orphan Deletion Script
         env:
-          IICS_POD_HOST: ${{ env.IICS_POD_HOST }}
+          IICS_LOGIN_HOST: dm-ap.informaticacloud.com
+          IICS_POD_HOST: apse1.dm-ap.informaticacloud.com   # <-- adjust to your pod
         run: |
-          CLEAN_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||; s|\.Project$||')
           python3 Explore/scripts/auto_cleanup.py \
             "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
             "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
-            "$CLEAN_NAME" \
+            "./iics" \
+            "${{ env.IICS_REGION }}" \
             "artifacts/workspace_deploy"
 
       - name: Upload Cleanup Audit Log
@@ -194,4 +200,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cleanup-log
-          path: cleanup_audit.log
+          path: cleanup_audit.log   # (you need to add logging inside script if desired)
