@@ -180,7 +180,9 @@ jobs:
 
       - name: Run Orphan Deletion Script
         run: |
-          PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||')
+          # Clean the name: Remove Explore/ and .Project extension
+          PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||; s|\.Project$||')
+          
           python3 Explore/scripts/auto_cleanup.py \
             "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
             "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
