@@ -1,0 +1,90 @@
+name: Deploy IICS Release to Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to deploy (e.g., v1.2.3)'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'uat'
+        type: choice
+        options:
+          - uat
+          - prod
+      project_path:
+        description: 'Project path (must match the exported project)'
+        required: false
+        default: 'Explore/Project_Alpha.Project'
+
+env:
+  IICS_REGION: ap
+  IICS_POD_HOST: dm-ap.informaticacloud.com
+
+jobs:
+  prepare:
+    name: Prepare package for ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    # No environment needed here because this job doesn't use target secrets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download release package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download ${{ github.event.inputs.version }} --pattern "*.zip" --output package.zip
+
+      - name: Apply ${{ github.event.inputs.environment }} overrides
+        run: |
+          mkdir -p workspace_${{ github.event.inputs.environment }}
+          ./iics extract -z package.zip -w workspace_${{ github.event.inputs.environment }}
+          python3 apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
+          ./iics package \
+            -w workspace_${{ github.event.inputs.environment }} \
+            -a "${{ github.event.inputs.project_path }}" \
+            -z package_${{ github.event.inputs.environment }}_final.zip
+
+      - name: Upload prepared package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ github.event.inputs.environment }}-${{ github.event.inputs.version }}
+          path: package_${{ github.event.inputs.environment }}_final.zip
+
+  import:
+    name: Import to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download prepared package
+        uses: actions/download-artifact@v4
+        with:
+          name: package-${{ github.event.inputs.environment }}-${{ github.event.inputs.version }}
+          path: ./
+
+      - name: Import to ${{ github.event.inputs.environment }}
+        run: |
+          ./iics import \
+            -n "${{ github.event.inputs.environment }}_Import_${{ github.event.inputs.version }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
+            -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
+            -z package_${{ github.event.inputs.environment }}_final.zip \
+            -s true
