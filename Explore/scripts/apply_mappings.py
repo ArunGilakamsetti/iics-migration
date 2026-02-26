@@ -6,11 +6,11 @@ import shutil
 import tempfile
 
 def process_content(content, conn_map, new_agent):
-    # Aggressive string swap for connections
-    for dev_conn, tgt_conn in conn_map.items():
-        content = content.replace(dev_conn, tgt_conn)
+    # Aggressive string replacement for connections
+    for dev_conn, uat_conn in conn_map.items():
+        content = content.replace(dev_conn, uat_conn)
 
-    # Targeted swap for agents
+    # Targeted swap for agents/runtime environments
     try:
         data = json.loads(content)
         def replace_keys(obj):
@@ -37,14 +37,11 @@ def apply_mappings(config_path, workspace_dir):
     modified_count = 0
 
     for root, _, files in os.walk(workspace_dir):
-        # Skip hidden sidecars
-        files = [f for f in files if not f.startswith('.')]
-        
         for file in files:
             file_path = os.path.join(root, file)
             has_changed = False
 
-            # CASE 1: JSON Files (Including the Manifest)
+            # CASE 1: JSON files (including the hidden .metadata files)
             if file.endswith(".json"):
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
@@ -55,7 +52,7 @@ def apply_mappings(config_path, workspace_dir):
                             f.write(new_c)
                         has_changed = True
                 except UnicodeDecodeError:
-                    continue # Skip binary files mislabeled as json
+                    continue
 
             # CASE 2: Nested Zip Assets
             elif file.endswith(".zip"):
@@ -67,8 +64,7 @@ def apply_mappings(config_path, workspace_dir):
                     z_modified = False
                     for zroot, _, zfiles in os.walk(temp_dir):
                         for zfile in zfiles:
-                            # ONLY process text/json files inside the zip
-                            if zfile.endswith(".json") or zfile.endswith(".xml") or zfile.endswith(".txt"):
+                            if zfile.endswith((".json", ".xml", ".txt")):
                                 zpath = os.path.join(zroot, zfile)
                                 try:
                                     with open(zpath, 'r', encoding='utf-8') as f:
@@ -93,9 +89,9 @@ def apply_mappings(config_path, workspace_dir):
 
             if has_changed:
                 modified_count += 1
-                print(f"  ✅ Updated: {file}")
+                # print(f"  Updated: {file}")
 
-    print(f"✨ Successfully updated {modified_count} assets.")
+    print(f"Successfully updated {modified_count} files and metadata sidecars.")
 
 if __name__ == "__main__":
     apply_mappings(sys.argv[1], sys.argv[2])

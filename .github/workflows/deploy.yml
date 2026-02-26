@@ -54,15 +54,13 @@ jobs:
           mkdir -p workspace_deploy
           ./iics extract -z package.zip -w workspace_deploy
           
-          # Execute the binary-safe override script for connections and agents
+          # This now handles both visible assets and hidden .json metadata
           python3 Explore/scripts/apply_mappings.py \
             Explore/configs/${{ github.event.inputs.environment }}_config.json \
             workspace_deploy
           
-          # Remove hidden checksum files to force CLI to re-calculate metadata
-          find workspace_deploy -name ".*.json" -type f -delete
+          # DO NOT delete hidden files anymore. The script updated them instead.
           
-          # Package the modified workspace
           ./iics package \
             -w workspace_deploy \
             -a "${{ github.event.inputs.project_path }}" \
