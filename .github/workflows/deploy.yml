@@ -180,13 +180,17 @@ jobs:
 
       - name: Run Orphan Deletion Script
         run: |
-          # Clean the name: Remove Explore/ and .Project extension
-          PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||; s|\.Project$||')
+          # 1. Get the folder name without .Project
+          CLEAN_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||; s|\.Project$||')
+          
+          # 2. Try passing the project name. 
+          # Note: If Project_Alpha is a top-level Project in IICS, this is correct.
+          # If it's a sub-folder, we might need the full path.
           
           python3 Explore/scripts/auto_cleanup.py \
             "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
             "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
-            "$PROJECT_NAME" \
+            "$CLEAN_NAME" \
             "artifacts/workspace_deploy"
 
       - name: Upload Cleanup Audit Log
