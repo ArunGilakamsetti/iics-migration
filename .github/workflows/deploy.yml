@@ -1,7 +1,6 @@
 name: Deploy IICS Release to Environment
 
-# This will make the run name show the selected environment, e.g., "Deploy IICS Release to uat"
-run-name: Deploy IICS Release to ${{ inputs.environment }}
+run-name: Deploy IICS Release ${{ inputs.version }} to ${{ inputs.environment }}
 
 on:
   workflow_dispatch:
@@ -15,12 +14,10 @@ on:
         required: true
         default: 'uat'
         type: choice
-        options:
-          - uat
-          - prod
+        options: [ uat, prod ]
       project_path:
-        description: 'Project path (must match the exported project)'
-        required: false
+        description: 'Project path (e.g., Explore/Project_Alpha.Project)'
+        required: true
         default: 'Explore/Project_Alpha.Project'
 
 env:
@@ -32,55 +29,69 @@ jobs:
     name: Prepare package for ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Download IICS CLI
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
-      - name: Download release package
+      - name: Download Release Package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download ${{ github.event.inputs.version }} --pattern "*.zip" --output package.zip
 
-      - name: Apply ${{ github.event.inputs.environment }} overrides
+      - name: Apply Overrides (Extract-Map-Package)
         run: |
-          mkdir -p workspace_${{ github.event.inputs.environment }}
-          ./iics extract -z package.zip -w workspace_${{ github.event.inputs.environment }}
-          python3 Explore/scripts/apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
+          # 1. Extract the raw zip into a workspace
+          mkdir -p workspace_deploy
+          ./iics extract -z package.zip -w workspace_deploy
+          
+          # 2. Run Python script to swap Connections/Agents/Emails
+          python3 Explore/scripts/apply_mappings.py \
+            Explore/configs/${{ github.event.inputs.environment }}_config.json \
+            workspace_deploy
+          
+          # 3. Re-package into an environment-ready ZIP
           ./iics package \
-            -w workspace_${{ github.event.inputs.environment }} \
+            -w workspace_deploy \
             -a "${{ github.event.inputs.project_path }}" \
-            -z package_${{ github.event.inputs.environment }}_final.zip
+            -z package_${{ github.event.inputs.environment }}_ready.zip
 
-      - name: Upload prepared package
+      - name: Upload Prepared Zip
         uses: actions/upload-artifact@v4
         with:
-          name: package-${{ github.event.inputs.environment }}-${{ github.event.inputs.version }}
-          path: package_${{ github.event.inputs.environment }}_final.zip
+          name: prepared-zip
+          path: package_${{ github.event.inputs.environment }}_ready.zip
+
+      - name: Upload Workspace Metadata (For Cleanup Job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-meta
+          path: workspace_deploy/
 
   import:
-    name: Import to ${{ github.event.inputs.environment }}
+    name: Import and Sync to ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
     needs: prepare
     environment: ${{ github.event.inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Download IICS CLI
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
-      - name: Download prepared package
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: package-${{ github.event.inputs.environment }}-${{ github.event.inputs.version }}
-          path: ./
+          path: artifacts/
 
-      - name: Import to ${{ github.event.inputs.environment }}
+      - name: Perform IICS Import
         run: |
           ./iics import \
             -n "${{ github.event.inputs.environment }}_Import_${{ github.event.inputs.version }}" \
@@ -88,5 +99,25 @@ jobs:
             --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
             -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
-            -z package_${{ github.event.inputs.environment }}_final.zip \
+            -z artifacts/prepared-zip/package_${{ github.event.inputs.environment }}_ready.zip \
             -s true
+
+      - name: Run Recursive Auto-Cleanup
+        run: |
+          # Derive project folder name (removes 'Explore/' but keeps extensions)
+          PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||')
+          
+          echo "🧹 Syncing IICS folder: $PROJECT_NAME"
+          
+          python3 Explore/scripts/auto_cleanup.py \
+            "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
+            "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
+            "$PROJECT_NAME" \
+            "artifacts/workspace-meta"
+
+      - name: Upload Cleanup Audit Log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleanup-audit-${{ github.event.inputs.environment }}
+          path: cleanup_audit.log
