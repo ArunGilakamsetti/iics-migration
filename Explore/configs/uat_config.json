@@ -1,10 +1,13 @@
 {
-    "environment": "uat",
-    "base_url": "https://dm-ap.informaticacloud.com",
-    "pod_url": "https://dm-ap.informaticacloud.com/",
-    "connections": {
-        "source_db": "UAT_SOURCE_CONN_ID",
-        "target_db": "UAT_TARGET_CONN_ID"
+  "connectionOverrides": [
+    {
+      "sourceConnectionName": "Sample Salesforce Connection",
+      "targetConnectionName": "Sample Salesforce Connection UAT"
     },
-    "runtime_environment": "UAT_AGENT_ID"
+    {
+      "sourceConnectionName": "DEV_Target_Connection",
+      "targetConnectionName": "UAT_Target_Connection"
+    }
+  ],
+  "runtimeEnvironmentOverride": "UAT_Agent_Name"
 }
