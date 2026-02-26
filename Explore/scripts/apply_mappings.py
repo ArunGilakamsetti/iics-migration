@@ -6,51 +6,28 @@ import shutil
 import tempfile
 
 def process_content(content, conn_map, agent_map):
-    """
-    Applies overrides to text content. 
-    Handles both simple string replacement and deep JSON key replacement.
-    """
-    # 1. Replace Connections (String-based for safety in all fields)
-    for dev_conn, tgt_conn in conn_map.items():
+    # 1. Replace Connections (Aggressive String Swap)
+    for dev_conn, uat_conn in conn_map.items():
         if dev_conn in content:
-            content = content.replace(dev_conn, tgt_conn)
+            content = content.replace(dev_conn, uat_conn)
 
-    # 2. Replace Agents (Targeted JSON replacement for specific IICS keys)
-    try:
-        data = json.loads(content)
-        def replace_agents(obj):
-            if isinstance(obj, dict):
-                for k, v in list(obj.items()):
-                    # Target known IICS agent key variations
-                    if k in ["runtimeEnvironmentName", "agentGroupName", "agentGroup"]:
-                        if isinstance(v, str):
-                            # Match against our agent mapping list
-                            for mapping in agent_map:
-                                if v == mapping['sourceAgentName']:
-                                    obj[k] = mapping['targetAgentName']
-                                    break
-                    else:
-                        replace_agents(v)
-            elif isinstance(obj, list):
-                for item in obj:
-                    replace_agents(item)
-        
-        replace_agents(data)
-        return json.dumps(data, indent=4)
-    except:
-        # If content isn't valid JSON, fallback to string replacement for agents
-        for mapping in agent_map:
-            content = content.replace(mapping['sourceAgentName'], mapping['targetAgentName'])
-        return content
+    # 2. Replace Agents (Aggressive String Swap)
+    # We use a loop to swap names directly in the raw text/JSON
+    for mapping in agent_map:
+        src = mapping['sourceAgentName']
+        tgt = mapping['targetAgentName']
+        if src in content:
+            content = content.replace(src, tgt)
+
+    return content
 
 def apply_mappings(config_path, workspace_dir):
     if not os.path.exists(config_path):
-        print(f"Error: Config not found at {config_path}"); sys.exit(1)
+        print(f"Error: Config not found: {config_path}"); sys.exit(1)
 
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    # Extract mappings from config
     conn_map = {item['sourceConnectionName']: item['targetConnectionName'] 
                 for item in config.get('connectionOverrides', [])}
     agent_map = config.get('agentOverrides', [])
@@ -62,7 +39,7 @@ def apply_mappings(config_path, workspace_dir):
             file_path = os.path.join(root, file)
             has_changed = False
 
-            # CASE 1: JSON files (Visible assets + Hidden metadata .json)
+            # Process JSON files (Assets + Hidden Metadata)
             if file.endswith(".json"):
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
@@ -73,9 +50,9 @@ def apply_mappings(config_path, workspace_dir):
                             f.write(new_c)
                         has_changed = True
                 except UnicodeDecodeError:
-                    continue # Skip binary files mislabeled as JSON
+                    continue
 
-            # CASE 2: Nested Zip Assets (MTTs, Connections, etc.)
+            # Process Nested Zip Assets
             elif file.endswith(".zip"):
                 temp_dir = tempfile.mkdtemp()
                 try:
@@ -85,7 +62,6 @@ def apply_mappings(config_path, workspace_dir):
                     z_modified = False
                     for zroot, _, zfiles in os.walk(temp_dir):
                         for zfile in zfiles:
-                            # Only process text-based files inside the zip
                             if zfile.endswith((".json", ".xml", ".txt")):
                                 zpath = os.path.join(zroot, zfile)
                                 try:
@@ -113,10 +89,7 @@ def apply_mappings(config_path, workspace_dir):
                 modified_count += 1
                 print(f"  Updated: {file}")
 
-    print(f"Successfully updated {modified_count} assets and metadata files.")
+    print(f"Successfully updated {modified_count} assets.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python3 apply_mappings.py <config_path> <workspace_dir>")
-        sys.exit(1)
     apply_mappings(sys.argv[1], sys.argv[2])
