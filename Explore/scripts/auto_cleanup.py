@@ -1,4 +1,4 @@
-import json, subprocess, os, zipfile
+import json, subprocess, os, zipfile, sys
 
 def load_dev_manifest(package_file):
     """Load DEV package manifest and return set of (name, type)."""
@@ -7,10 +7,10 @@ def load_dev_manifest(package_file):
     return { (obj['name'], obj['type']) for obj in manifest['objects'] }
 
 def load_target_objects(file):
-    """Load target environment objects from listObjects output."""
+    """Load target environment objects from REST API output."""
     with open(file) as f:
         data = json.load(f)
-    return { (obj['name'], obj['type']) for obj in data['objects'] }
+    return { (obj['name'], obj['type']) for obj in data.get('objects', []) }
 
 def delete_object(name, obj_type):
     """Delete object from target environment using CLI."""
@@ -21,13 +21,17 @@ def delete_object(name, obj_type):
         "-t", obj_type,
         "-r", os.environ["IICS_REGION"],
         "--podHostName", os.environ["IICS_POD_HOST"],
-        "-u", os.environ["UAT_IICS_USER"],
-        "-p", os.environ["UAT_IICS_PWD"]
+        "-u", os.environ[f"{os.environ['DEPLOY_ENV'].upper()}_IICS_USER"],
+        "-p", os.environ[f"{os.environ['DEPLOY_ENV'].upper()}_IICS_PWD"]
     ], check=True)
 
 if __name__ == "__main__":
-    # Load DEV manifest
-    dev_objects = load_dev_manifest(f"package_{os.environ['GITHUB_SHA']}.zip")
+    env = os.environ["DEPLOY_ENV"]
+    dry_run = "--check-only" in sys.argv
+
+    # Load DEV manifest from the prepared package file
+    package_file = f"package_{env}_final.zip"
+    dev_objects = load_dev_manifest(package_file)
 
     # Load target environment objects
     target_objects = load_target_objects("target_objects.json")
@@ -36,8 +40,12 @@ if __name__ == "__main__":
     to_delete = target_objects - dev_objects
 
     for name, obj_type in to_delete:
-        # Skip anything inside Adhoc_Activities folder
+        # Skip adhoc folder
         if name.startswith("Adhoc_Activities/"):
             print(f"Skipping adhoc object: {name}")
             continue
-        delete_object(name, obj_type)
+
+        if dry_run:
+            print(f"[DRY-RUN] Would delete {obj_type}: {name}")
+        else:
+            delete_object(name, obj_type)

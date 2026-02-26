@@ -25,6 +25,7 @@ on:
 env:
   IICS_REGION: ap
   IICS_POD_HOST: dm-ap.informaticacloud.com
+  DEPLOY_ENV: ${{ github.event.inputs.environment }}
 
 jobs:
   prepare:
@@ -79,13 +80,16 @@ jobs:
           name: package-${{ github.event.inputs.environment }}-${{ github.event.inputs.version }}
           path: ./
 
-      - name: List target org objects
+      - name: Fetch target org objects
         run: |
-          ./iics listObjects \
-            -r ${{ env.IICS_REGION }} \
-            --podHostName ${{ env.IICS_POD_HOST }} \
+          SESSION_ID=$(./iics login \
             -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
             -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }})
+
+          curl -s -X GET "https://${{ env.IICS_POD_HOST }}/public/core/v3/objects" \
+            -H "icSessionId: $SESSION_ID" \
             -o target_objects.json
 
       - name: Auto-cleanup old objects (excluding adhoc folder)
