@@ -1,5 +1,7 @@
 name: Deploy IICS Release Modular with Rollback
 
+run-name: Deploy IICS Release ${{ inputs.version }} to ${{ inputs.environment }}
+
 on:
   workflow_dispatch:
     inputs:
