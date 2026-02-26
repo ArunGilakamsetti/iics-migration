@@ -16,8 +16,7 @@ on:
 env:
   IICS_REGION: ap
   IICS_POD_HOST: dm-ap.informaticacloud.com
-  # Ensure this matches the exact folder/project name in your IICS Explore tab
-  PROJECT_PATH: Explore/Project_Alpha.Project 
+  PROJECT_PATH: Explore/Project_Alpha.Project   # Adjust as needed
 
 jobs:
   export:
@@ -77,10 +76,8 @@ jobs:
           mkdir -p workspace_uat
           ./iics extract -z package_${{ github.sha }}.zip -w workspace_uat
           
-          # Inject mappings into the JSON files
           python3 apply_mappings.py Explore/configs/uat_config.json workspace_uat
           
-          # Pack it back up - specifying the artifact (-a) is mandatory here
           ./iics package \
             -w workspace_uat \
             -a "${{ env.PROJECT_PATH }}" \
@@ -105,6 +102,8 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # required for version bumping to see commit history
 
       - name: Download IICS CLI
         run: |
@@ -140,12 +139,31 @@ jobs:
             -z package_prod_final.zip \
             -s true
 
+      # --- NEW: Automatic version bump and tag creation ---
+      - name: Bump version and create tag
+        id: bump
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_branches: prod
+          default_bump: patch          # change to 'major', 'minor', or 'auto'
+          tag_prefix: v
+
+      # --- UPDATED: GitHub Release with auto‑generated notes ---
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         if: success()
         with:
-          tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
+          tag_name: ${{ steps.bump.outputs.new_tag }}
+          name: Release ${{ steps.bump.outputs.new_tag }}
+          body: |
+            **IICS Production Deployment**
+            - Commit: ${{ github.sha }}
+            - Package: package_prod_final.zip
+            
+            **What's Changed:**
+            ${{ steps.bump.outputs.changelog }}
           files: package_prod_final.zip
+          generate_release_notes: true    # fallback if changelog is empty
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
