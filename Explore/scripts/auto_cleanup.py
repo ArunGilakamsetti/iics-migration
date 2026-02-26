@@ -1,63 +1,60 @@
-import json, subprocess, os, zipfile, sys
+import requests
+import os
+import sys
 
-def load_dev_manifest(package_file):
-    """Load DEV package manifest from exportMetadata.v2.json."""
-    with zipfile.ZipFile(package_file, 'r') as z:
-        files = z.namelist()
-        print("Package contents:", files)
+# List of common IICS extensions to strip from filenames
+IICS_EXTENSIONS = [
+    ".MTT.json", ".DTEMPLATE.json", ".Connection.json", 
+    ".WORKFLOW.json", ".DSS.json", ".DMASK.json", ".AI_SERVICE_CONNECTOR.json"
+]
 
-        # Look specifically for exportMetadata.v2.json
-        if "exportMetadata.v2.json" not in files:
-            raise FileNotFoundError("exportMetadata.v2.json not found in package zip")
+def auto_cleanup(user, pwd, project_name, workspace_dir):
+    # 1. Login Logic
+    login_url = "https://dm-ap.informaticacloud.com/saas/api/core/v3/login"
+    login_res = requests.post(login_url, json={"username": user, "password": pwd})
+    if login_res.status_code != 200:
+        print("Login failed.")
+        sys.exit(1)
 
-        with z.open("exportMetadata.v2.json") as f:
-            manifest = json.load(f)
+    auth_data = login_res.json()
+    base_url = auth_data["userInfo"]["baseApiUrl"]
+    headers = {"INFA-SESSION-ID": auth_data["userInfo"]["sessionId"]}
 
-    # Extract exportedObjects list
-    if "exportedObjects" in manifest:
-        return { (obj['objectName'], obj['objectType']) for obj in manifest['exportedObjects'] }
-    else:
-        raise KeyError("exportMetadata.v2.json does not contain 'exportedObjects'")
+    # 2. Build local asset list with better parsing
+    assets_to_keep = set()
+    for root, _, files in os.walk(workspace_dir):
+        for f in files:
+            if f.endswith(".json") and not f.startswith("."):
+                clean_name = f
+                for ext in IICS_EXTENSIONS:
+                    if f.endswith(ext):
+                        clean_name = f.replace(ext, "")
+                        break
+                assets_to_keep.add(clean_name)
 
-def load_target_objects(file):
-    """Load target environment objects from REST API output."""
-    with open(file) as f:
-        data = json.load(f)
-    return { (obj['name'], obj['type']) for obj in data.get('objects', []) }
+    # 3. Fetch Remote Assets
+    query = f"location=='{project_name}'"
+    lookup_url = f"{base_url}/public/core/v3/objects?q={query}"
+    remote_res = requests.get(lookup_url, headers=headers)
+    remote_objects = remote_res.json().get("objects", [])
 
-def delete_object(name, obj_type):
-    """Delete object from target environment using CLI."""
-    print(f"Deleting {obj_type}: {name}...")
-    subprocess.run([
-        "./iics", "deleteObject",
-        "-n", name,
-        "-t", obj_type,
-        "-r", os.environ["IICS_REGION"],
-        "--podHostName", os.environ["IICS_POD_HOST"],
-        "-u", os.environ[f"{os.environ['DEPLOY_ENV'].upper()}_IICS_USER"],
-        "-p", os.environ[f"{os.environ['DEPLOY_ENV'].upper()}_IICS_PWD"]
-    ], check=True)
+    # 4. Filtered Delete
+    print(f"Checking for orphans in {project_name}...")
+    for obj in remote_objects:
+        # SAFETY: Never delete Folders or Connections automatically unless sure
+        if obj["type"] == "Folder":
+            continue
+            
+        # Optional: Skip deleting connections to be safe
+        # if obj["type"] == "Connection": continue
+
+        if obj["name"] not in assets_to_keep:
+            print(f"🗑️ Deleting {obj['type']}: {obj['name']}...")
+            del_res = requests.delete(f"{base_url}/public/core/v3/objects/{obj['id']}", headers=headers)
+            if del_res.status_code == 204:
+                print(f"✅ Success.")
+            else:
+                print(f"❌ Failed (Status {del_res.status_code}). Check for active dependencies.")
 
 if __name__ == "__main__":
-    env = os.environ["DEPLOY_ENV"]
-    dry_run = "--check-only" in sys.argv
-
-    # Load DEV manifest from prepared package
-    package_file = f"package_{env}_final.zip"
-    dev_objects = load_dev_manifest(package_file)
-
-    # Load target environment objects
-    target_objects = load_target_objects("target_objects.json")
-
-    # Find objects in target but not in DEV
-    to_delete = target_objects - dev_objects
-
-    for name, obj_type in to_delete:
-        if name.startswith("Adhoc_Activities/"):
-            print(f"Skipping adhoc object: {name}")
-            continue
-
-        if dry_run:
-            print(f"[DRY-RUN] Would delete {obj_type}: {name}")
-        else:
-            delete_object(name, obj_type)
+    auto_cleanup(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
