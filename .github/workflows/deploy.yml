@@ -1,81 +1,116 @@
-name: Deploy IICS Release to Environment
-
-run-name: Deploy IICS Release ${{ inputs.version }} to ${{ inputs.environment }}
+name: Deploy IICS Release Modular with Rollback
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version to deploy (e.g., v1.2.3)'
+        description: 'Release version (e.g., v1.0.0)'
         required: true
-        type: string
       environment:
-        description: 'Target environment'
+        description: 'Target Environment'
         required: true
         default: 'uat'
         type: choice
         options: [ uat, prod ]
       project_path:
-        description: 'Project path (e.g., Explore/Project_Alpha.Project)'
+        description: 'IICS Project Path'
         required: true
         default: 'Explore/Project_Alpha.Project'
+      previous_stable_version:
+        description: 'Version to rollback to if this fails'
+        required: false
+        type: string
 
 env:
   IICS_REGION: ap
   IICS_POD_HOST: dm-ap.informaticacloud.com
 
 jobs:
+  # --- JOB 1: PREPARE ---
   prepare:
-    name: Prepare package for ${{ github.event.inputs.environment }}
+    name: Prepare Environment Package
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Download IICS CLI
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
-      - name: Download Release Package
+      - name: Download GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download ${{ github.event.inputs.version }} --pattern "*.zip" --output package.zip
+        run: gh release download ${{ github.event.inputs.version }} --pattern "*.zip" --output package.zip
 
-      - name: Apply Overrides (Extract-Map-Package)
+      - name: Apply Overrides and Refresh Metadata
         run: |
-          # 1. Extract the raw zip into a workspace
           mkdir -p workspace_deploy
           ./iics extract -z package.zip -w workspace_deploy
           
-          # 2. Run Python script to swap Connections/Agents/Emails
+          # Execute the binary-safe override script for connections and agents
           python3 Explore/scripts/apply_mappings.py \
             Explore/configs/${{ github.event.inputs.environment }}_config.json \
             workspace_deploy
           
-          # 3. Re-package into an environment-ready ZIP
+          # Remove hidden checksum files to force CLI to re-calculate metadata
+          find workspace_deploy -name ".*.json" -type f -delete
+          
+          # Package the modified workspace
           ./iics package \
             -w workspace_deploy \
             -a "${{ github.event.inputs.project_path }}" \
-            -z package_${{ github.event.inputs.environment }}_ready.zip
+            -z ready_to_deploy.zip
 
-      - name: Upload Prepared Zip
+      - name: Upload Deployment Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prepared-zip
-          path: package_${{ github.event.inputs.environment }}_ready.zip
+          name: deployment-bundle
+          path: |
+            ready_to_deploy.zip
+            workspace_deploy/
+          retention-days: 1
 
-      - name: Upload Workspace Metadata (For Cleanup Job)
-        uses: actions/upload-artifact@v4
-        with:
-          name: workspace-meta
-          path: workspace_deploy/
-
+  # --- JOB 2: IMPORT ---
   import:
-    name: Import and Sync to ${{ github.event.inputs.environment }}
-    runs-on: ubuntu-latest
+    name: Import to IICS
     needs: prepare
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download Prepared Bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-bundle
+
+      - name: Execute IICS Import
+        run: |
+          ./iics import \
+            -n "Deploy_${{ github.event.inputs.version }}_${{ github.run_id }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
+            -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
+            -z ready_to_deploy.zip \
+            -s true
+
+  # --- JOB 3: ROLLBACK (Only on Failure) ---
+  rollback:
+    name: Emergency Rollback
+    needs: [prepare, import]
+    if: failure() && github.event.inputs.previous_stable_version != ''
+    runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
       - name: Checkout Code
@@ -86,38 +121,64 @@ jobs:
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
 
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
+      - name: Download Previous Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download ${{ github.event.inputs.previous_stable_version }} --pattern "*.zip" --output rollback_package.zip
 
-      - name: Perform IICS Import
+      - name: Prepare and Deploy Rollback
         run: |
+          mkdir -p workspace_rollback
+          ./iics extract -z rollback_package.zip -w workspace_rollback
+          
+          python3 Explore/scripts/apply_mappings.py \
+            Explore/configs/${{ github.event.inputs.environment }}_config.json \
+            workspace_rollback
+            
+          find workspace_rollback -name ".*.json" -type f -delete
+          
+          ./iics package \
+            -w workspace_rollback \
+            -a "${{ github.event.inputs.project_path }}" \
+            -z rollback_final.zip
+          
           ./iics import \
-            -n "${{ github.event.inputs.environment }}_Import_${{ github.event.inputs.version }}" \
+            -n "ROLLBACK_to_${{ github.event.inputs.previous_stable_version }}" \
             -r ${{ env.IICS_REGION }} \
             --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
             -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
-            -z artifacts/prepared-zip/package_${{ github.event.inputs.environment }}_ready.zip \
+            -z rollback_final.zip \
             -s true
 
-      - name: Run Recursive Auto-Cleanup
+  # --- JOB 4: CLEANUP ---
+  cleanup:
+    name: Post Deploy Cleanup
+    needs: [prepare, import]
+    if: success()
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Download Workspace Metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-bundle
+          path: artifacts
+
+      - name: Run Orphan Deletion Script
         run: |
-          # Derive project folder name (removes 'Explore/' but keeps extensions)
+          # Derive project folder name by removing Explore/ prefix
           PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||')
-          
-          echo "🧹 Syncing IICS folder: $PROJECT_NAME"
           
           python3 Explore/scripts/auto_cleanup.py \
             "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
             "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
             "$PROJECT_NAME" \
-            "artifacts/workspace-meta"
+            "artifacts/workspace_deploy"
 
       - name: Upload Cleanup Audit Log
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: cleanup-audit-${{ github.event.inputs.environment }}
+          name: cleanup-log
           path: cleanup_audit.log

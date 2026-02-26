@@ -6,38 +6,27 @@ import shutil
 import tempfile
 
 def process_content(content, conn_map, new_agent):
-    # 1. Aggressive String Replacement for Connections
-    # This handles connection names regardless of where they are in the JSON
-    for dev_conn, uat_conn in conn_map.items():
-        if dev_conn in content:
-            content = content.replace(dev_conn, uat_conn)
+    # Aggressive string swap for connections
+    for dev_conn, tgt_conn in conn_map.items():
+        content = content.replace(dev_conn, tgt_conn)
 
-    # 2. Precise replacement for Agent/Runtime Environment
+    # Targeted swap for agents
     try:
         data = json.loads(content)
-        def replace_agent_keys(obj):
+        def replace_keys(obj):
             if isinstance(obj, dict):
                 for k, v in list(obj.items()):
-                    # Target all known IICS agent key variations
                     if k in ["runtimeEnvironmentName", "agentGroupName", "agentGroup"]:
-                        if isinstance(v, str) and v != new_agent:
-                            obj[k] = new_agent
-                    else:
-                        replace_agent_keys(v)
+                        if isinstance(v, str): obj[k] = new_agent
+                    else: replace_keys(v)
             elif isinstance(obj, list):
-                for item in obj:
-                    replace_agent_keys(item)
-        
-        if new_agent:
-            replace_agent_keys(data)
+                for item in obj: replace_keys(item)
+        if new_agent: replace_keys(data)
         return json.dumps(data, indent=4)
     except:
-        return content 
+        return content
 
 def apply_mappings(config_path, workspace_dir):
-    if not os.path.exists(config_path):
-        print(f"❌ Config not found: {config_path}"); sys.exit(1)
-
     with open(config_path, 'r') as f:
         config = json.load(f)
 
@@ -48,18 +37,16 @@ def apply_mappings(config_path, workspace_dir):
     modified_count = 0
 
     for root, _, files in os.walk(workspace_dir):
-        # Skip the hidden metadata files (starting with dot) to avoid checksum conflicts
+        # Skip hidden sidecars
         files = [f for f in files if not f.startswith('.')]
         
         for file in files:
             file_path = os.path.join(root, file)
-            
-            # Process JSON and ZIP (Nested MTTs)
-            if file.endswith(".json") or file.endswith(".zip"):
-                is_zip = file.endswith(".zip")
-                has_changed = False
-                
-                if not is_zip:
+            has_changed = False
+
+            # CASE 1: JSON Files (Including the Manifest)
+            if file.endswith(".json"):
+                try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         old_c = f.read()
                     new_c = process_content(old_c, conn_map, new_agent)
@@ -67,34 +54,46 @@ def apply_mappings(config_path, workspace_dir):
                         with open(file_path, 'w', encoding='utf-8') as f:
                             f.write(new_c)
                         has_changed = True
-                else:
-                    # Handle nested Zip assets
-                    temp_dir = tempfile.mkdtemp()
+                except UnicodeDecodeError:
+                    continue # Skip binary files mislabeled as json
+
+            # CASE 2: Nested Zip Assets
+            elif file.endswith(".zip"):
+                temp_dir = tempfile.mkdtemp()
+                try:
                     with zipfile.ZipFile(file_path, 'r') as z_ref:
                         z_ref.extractall(temp_dir)
                     
+                    z_modified = False
                     for zroot, _, zfiles in os.walk(temp_dir):
                         for zfile in zfiles:
-                            zpath = os.path.join(zroot, zfile)
-                            with open(zpath, 'r', encoding='utf-8') as f:
-                                zold = f.read()
-                            znew = process_content(zold, conn_map, new_agent)
-                            if zold != znew:
-                                with open(zpath, 'w', encoding='utf-8') as f:
-                                    f.write(znew)
-                                has_changed = True
+                            # ONLY process text/json files inside the zip
+                            if zfile.endswith(".json") or zfile.endswith(".xml") or zfile.endswith(".txt"):
+                                zpath = os.path.join(zroot, zfile)
+                                try:
+                                    with open(zpath, 'r', encoding='utf-8') as f:
+                                        zold = f.read()
+                                    znew = process_content(zold, conn_map, new_agent)
+                                    if zold != znew:
+                                        with open(zpath, 'w', encoding='utf-8') as f:
+                                            f.write(znew)
+                                        z_modified = True
+                                except UnicodeDecodeError:
+                                    continue
                     
-                    if has_changed:
+                    if z_modified:
                         with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as z_out:
                             for zroot, _, zfiles in os.walk(temp_dir):
                                 for zfile in zfiles:
                                     fp = os.path.join(zroot, zfile)
                                     z_out.write(fp, os.path.relpath(fp, temp_dir))
+                        has_changed = True
+                finally:
                     shutil.rmtree(temp_dir)
 
-                if has_changed:
-                    modified_count += 1
-                    print(f"  ✅ Modified: {file}")
+            if has_changed:
+                modified_count += 1
+                print(f"  ✅ Updated: {file}")
 
     print(f"✨ Successfully updated {modified_count} assets.")
 
