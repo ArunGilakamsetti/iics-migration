@@ -1,82 +1,84 @@
-import requests
-import os
 import sys
-from datetime import datetime
+import os
+import json
+import requests
 
-IICS_EXTENSIONS = [
-    ".MTT.json", ".DTEMPLATE.json", ".Connection.json", 
-    ".WORKFLOW.json", ".DSS.json", ".DMASK.json", ".AI_SERVICE_CONNECTOR.json",
-    ".TASKFLOW.json", ".BUSINESS_SERVICE.json"
-]
+def get_iics_session(user, pwd, pod_host):
+    login_url = f"https://{pod_host}/saas/public/core/v3/login"
+    res = requests.post(login_url, json={"username": user, "password": pwd})
+    if res.status_code != 200:
+        print("❌ Login Failed"); sys.exit(1)
+    print("✅ Login Successful.")
+    data = res.json()
+    return data['userInfo']['sessionId'], data['userInfo']['baseUrl']
 
-def auto_cleanup(user, pwd, project_name, workspace_dir):
-    log_entries = [f"--- IICS Deep Cleanup Audit: {datetime.now()} ---"]
+def get_remote_assets(session_id, base_url, project_name):
+    # We use a broad search filter to find anything in the target project path
+    search_url = f"{base_url}/api/v2/mdata/search"
+    headers = {"icSessionId": session_id, "Accept": "application/json"}
     
-    # 1. Login
-    login_url = "https://dm-ap.informaticacloud.com/ma/api/v2/user/login"
-    try:
-        res = requests.post(login_url, json={"username": user, "password": pwd})
-        auth_data = res.json()
-        v3_base_url = f"{auth_data['serverUrl']}/public/core/v3"
-        headers = {"INFA-SESSION-ID": auth_data["icSessionId"], "Accept": "application/json"}
-        print("✅ Login Successful.")
-    except:
-        print("❌ Login failed."); sys.exit(1)
-
-    # 2. Map Local Assets (Workspace)
-    assets_to_keep = set()
-    for root, _, files in os.walk(workspace_dir):
-        for f in files:
-            if f.endswith(".json") and not f.startswith("."):
-                clean_name = f
-                for ext in IICS_EXTENSIONS:
-                    if f.endswith(ext):
-                        clean_name = f.replace(ext, "")
-                        break
-                assets_to_keep.add(clean_name)
-
-    # 3. Lookup the Project/Folder ID first
-    # Many orgs require the folder ID to filter objects reliably
-    print(f"🔍 Locating folder ID for: {project_name}")
-    folder_query = f"{v3_base_url}/objects?q=name=='{project_name}' and type=='Folder'"
-    folder_res = requests.get(folder_query, headers=headers).json()
+    # IICS locations often look like "Project_Alpha" or "Project_Alpha/Folder"
+    params = {"q": f"location:'{project_name}' OR location:'{project_name}/*'"}
+    res = requests.get(search_url, headers=headers, params=params)
     
-    folder_id = None
-    if folder_res.get("objects"):
-        folder_id = folder_res["objects"][0]["id"]
-        print(f"📍 Found Folder ID: {folder_id}")
+    if res.status_code != 200:
+        print(f"⚠️ Search failed with status {res.status_code}")
+        return {}
+
+    remote_assets = {}
+    for asset in res.json():
+        # Map asset name + type to the object ID
+        key = f"{asset['name']}.{asset['type']}"
+        remote_assets[key] = asset['id']
+    
+    return remote_assets
+
+def get_local_assets(workspace_path):
+    local_assets = set()
+    for root, _, files in os.walk(workspace_path):
+        for file in files:
+            # Skip hidden metadata sidecars and folder/project definitions
+            if file.startswith(".") or file.endswith((".Folder.json", ".Project.json")):
+                continue
+            
+            # Extract Name.Type from filename (e.g., MyMapping.DTEMPLATE.zip -> MyMapping.DTEMPLATE)
+            parts = file.split('.')
+            if len(parts) >= 2:
+                local_assets.add(f"{parts[0]}.{parts[1]}")
+    return local_assets
+
+def delete_asset(session_id, base_url, asset_id, asset_key):
+    delete_url = f"{base_url}/api/v2/mdata/delete/{asset_id}"
+    headers = {"icSessionId": session_id, "Accept": "application/json"}
+    res = requests.post(delete_url, headers=headers)
+    if res.status_code == 200:
+        print(f"🗑️ Deleted orphan: {asset_key}")
     else:
-        # If lookup by name fails, we try the direct location query as fallback
-        print("⚠️ Could not find Folder ID. Falling back to location string query.")
+        print(f"❌ Failed to delete {asset_key}: {res.text}")
 
-    # 4. Fetch Remote Assets
-    if folder_id:
-        # Querying by locationId is the most accurate way in v3
-        lookup_url = f"{v3_base_url}/objects?q=locationId=='{folder_id}'"
-    else:
-        lookup_url = f"{v3_base_url}/objects?q=location=='{project_name}'"
-
-    remote_objects = requests.get(lookup_url, headers=headers).json().get("objects", [])
-    valid_remote_objects = [obj for obj in remote_objects if "name" in obj and obj.get("type") != "Folder"]
-
-    print(f"📊 Summary: Found {len(valid_remote_objects)} remote assets in IICS.")
-    print(f"📦 Summary: Found {len(assets_to_keep)} assets in Git workspace.")
-
-    # 5. Deletion Logic
-    deleted = 0
-    for obj in valid_remote_objects:
-        if obj["name"] not in assets_to_keep:
-            print(f"🗑️ Found Orphan: {obj['name']} ({obj['type']})")
-            del_res = requests.delete(f"{v3_base_url}/objects/{obj['id']}", headers=headers)
-            if del_res.status_code == 204:
-                log_entries.append(f"DELETED: {obj['name']}")
-                deleted += 1
-            else:
-                log_entries.append(f"FAILED: {obj['name']} (Status: {del_res.status_code})")
-
-    with open("cleanup_audit.log", "w") as f:
-        f.write("\n".join(log_entries))
-    print(f"✨ Done. Deleted {deleted} orphans.")
+def main():
+    user, pwd, project_name, workspace_path = sys.argv[1:5]
+    pod_host = os.getenv("IICS_POD_HOST", "dm-ap.informaticacloud.com")
+    
+    session_id, base_url = get_iics_session(user, pwd, pod_host)
+    
+    print(f"🔍 Fetching remote assets for location: {project_name}")
+    remote_assets = get_remote_assets(session_id, base_url, project_name)
+    local_assets = get_local_assets(workspace_path)
+    
+    print(f"📊 Summary: Found {len(remote_assets)} remote assets in IICS.")
+    print(f"📦 Summary: Found {len(local_assets)} assets in Git workspace.")
+    
+    orphans_found = 0
+    for asset_key, asset_id in remote_assets.items():
+        if asset_key not in local_assets:
+            # Double check: we don't want to delete the project or folders themselves
+            if ".Folder" in asset_key or ".Project" in asset_key:
+                continue
+            delete_asset(session_id, base_url, asset_id, asset_key)
+            orphans_found += 1
+            
+    print(f"✨ Done. Deleted {orphans_found} orphans.")
 
 if __name__ == "__main__":
-    auto_cleanup(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+    main()
