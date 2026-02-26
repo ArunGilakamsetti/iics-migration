@@ -97,13 +97,15 @@ jobs:
         with:
           name: package-${{ inputs.environment }}-${{ inputs.version }}
           path: ./
+          
       - name: Import to ${{ inputs.environment }}
         run: |
-          ./iics import \
+            ./iics import \
             -n "${{ inputs.environment }}_Import_${{ inputs.version }}" \
             -r ${{ env.IICS_REGION }} \
             --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets[format('{0}_IICS_USER', inputs.environment)] }} \
             -p ${{ secrets[format('{0}_IICS_PWD', inputs.environment)] }} \
             -z package_${{ inputs.environment }}_final.zip \
+            --import-strategy REPLACE \
             -s true
