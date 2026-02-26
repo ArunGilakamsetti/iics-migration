@@ -105,11 +105,13 @@ jobs:
 
       - name: Run Auto-Cleanup (Delete Orphans)
         run: |
-          # Extract the Project Folder name from the path (e.g., Explore/Project_Alpha.Project -> Project_Alpha)
-          PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | cut -d'/' -f2 | cut -d'.' -f1)
-          
-          python3 Explore/scripts/auto_cleanup.py \
-            "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
-            "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
-            "$PROJECT_NAME" \
-            "workspace-meta"
+            # Remove 'Explore/' from the path to get the IICS folder name
+            PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|Explore/||')
+            
+            echo "Targeting IICS Folder: $PROJECT_NAME"
+            
+            python3 Explore/scripts/auto_cleanup.py \
+                "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
+                "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
+                "$PROJECT_NAME" \
+                "workspace-meta"
