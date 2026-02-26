@@ -7,6 +7,10 @@
     {
       "sourceConnectionName": "DEV_Target_Connection",
       "targetConnectionName": "UAT_Target_Connection"
+    },
+    {
+      "sourceConnectionName": "Informatica Cloud Hosted Agent",
+      "targetConnectionName": "Informatica Cloud Hosted Agent UAT"
     }
   ],
   "runtimeEnvironmentOverride": "UAT_Agent_Name"

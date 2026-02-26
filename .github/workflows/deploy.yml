@@ -56,13 +56,12 @@ jobs:
           mkdir -p workspace_deploy
           ./iics extract -z package.zip -w workspace_deploy
           
-          # This now handles both visible assets and hidden .json metadata
+          # This script handles assets, manifest, and hidden metadata sidecars
           python3 Explore/scripts/apply_mappings.py \
             Explore/configs/${{ github.event.inputs.environment }}_config.json \
             workspace_deploy
           
-          # DO NOT delete hidden files anymore. The script updated them instead.
-          
+          # Re-package with fresh checksums (calculated by the CLI)
           ./iics package \
             -w workspace_deploy \
             -a "${{ github.event.inputs.project_path }}" \
@@ -116,6 +115,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Download IICS CLI
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
@@ -134,8 +138,6 @@ jobs:
           python3 Explore/scripts/apply_mappings.py \
             Explore/configs/${{ github.event.inputs.environment }}_config.json \
             workspace_rollback
-            
-          find workspace_rollback -name ".*.json" -type f -delete
           
           ./iics package \
             -w workspace_rollback \
@@ -159,6 +161,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Download Workspace Metadata
         uses: actions/download-artifact@v4
         with:
@@ -167,9 +177,9 @@ jobs:
 
       - name: Run Orphan Deletion Script
         run: |
-          # Derive project folder name by removing Explore/ prefix
           PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|^Explore/||')
           
+          # Metadata resides in artifacts/workspace_deploy after download
           python3 Explore/scripts/auto_cleanup.py \
             "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
             "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
