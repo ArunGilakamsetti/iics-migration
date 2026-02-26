@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p workspace_${{ github.event.inputs.environment }}
           ./iics extract -z package.zip -w workspace_${{ github.event.inputs.environment }}
-          python3 apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
+          python3 Explore/scripts/apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
           ./iics package \
             -w workspace_${{ github.event.inputs.environment }} \
             -a "${{ github.event.inputs.project_path }}" \
