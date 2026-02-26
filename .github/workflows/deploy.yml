@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p workspace_${{ github.event.inputs.environment }}
           ./iics extract -z package.zip -w workspace_${{ github.event.inputs.environment }}
-          python3 Explore/scripts/apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
+          python3 apply_mappings.py Explore/configs/${{ github.event.inputs.environment }}_config.json workspace_${{ github.event.inputs.environment }}
           ./iics package \
             -w workspace_${{ github.event.inputs.environment }} \
             -a "${{ github.event.inputs.project_path }}" \
@@ -80,16 +80,29 @@ jobs:
           name: package-${{ github.event.inputs.environment }}-${{ github.event.inputs.version }}
           path: ./
 
+      - name: Get IICS session ID
+        run: |
+          SESSION_ID=$(curl -s -X POST "https://${{ env.IICS_POD_HOST }}/ma/api/v2/user/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}\",\"password\":\"${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}\"}" \
+            | jq -r '.icSessionId')
+
+          if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" = "null" ]; then
+            echo "Failed to obtain session ID"
+            exit 1
+          fi
+
+          echo "SESSION_ID=$SESSION_ID" >> $GITHUB_ENV
+
       - name: Fetch target org objects
         run: |
           curl -s -X GET "https://${{ env.IICS_POD_HOST }}/public/core/v3/objects" \
-            -u "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}:${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
+            -H "icSessionId: $SESSION_ID" \
             -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
             -o target_objects.json
 
-          echo "Fetched target_objects.json:"
-          cat target_objects.json
+          echo "Fetched target_objects.json (first 20 lines):"
+          head -n 20 target_objects.json
 
       - name: Auto-cleanup old objects (excluding adhoc folder)
         run: |
