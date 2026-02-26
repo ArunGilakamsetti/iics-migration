@@ -73,7 +73,7 @@ jobs:
           path: ./
       - name: Run cleanup script
         run: |
-          python .github/scripts/cleanup_target.py \
+          python Explore/scripts/cleanup_target.py \
             --username "${{ secrets[format('{0}_IICS_USER', inputs.environment)] }}" \
             --password "${{ secrets[format('{0}_IICS_PWD', inputs.environment)] }}" \
             --package "package_${{ inputs.environment }}_final.zip"
