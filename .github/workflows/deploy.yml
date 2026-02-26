@@ -106,7 +106,7 @@ jobs:
       - name: Run Auto-Cleanup (Delete Orphans)
         run: |
             # Remove 'Explore/' from the path to get the IICS folder name
-            PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | sed 's|Explore/||')
+            PROJECT_NAME=$(echo "${{ github.event.inputs.project_path }}" | cut -d'/' -f2 | cut -d'.' -f1)
             
             echo "Targeting IICS Folder: $PROJECT_NAME"
             
