@@ -94,17 +94,17 @@ jobs:
 
           echo "SESSION_ID=$SESSION_ID" >> $GITHUB_ENV
 
-      - name: Fetch target org objects (try /saas first, fallback to /public)
+      - name: Fetch target org objects (try /saas/api first, fallback to /api)
         run: |
-          echo "Trying /saas/public/core/v3/objects..."
-          curl -s -X GET "https://${{ env.IICS_POD_HOST }}/saas/public/core/v3/objects" \
+          echo "Trying /saas/api/core/v3/objects..."
+          curl -s -X GET "https://${{ env.IICS_POD_HOST }}/saas/api/core/v3/objects" \
             -H "INFA-SESSION-ID: $SESSION_ID" \
             -H "Accept: application/json" \
             -o target_objects.json || true
 
           if grep -q "<html>" target_objects.json || grep -q "\"error\"" target_objects.json; then
-            echo "Fallback: trying /public/core/v3/objects..."
-            curl -s -X GET "https://${{ env.IICS_POD_HOST }}/public/core/v3/objects" \
+            echo "Fallback: trying /api/core/v3/objects..."
+            curl -s -X GET "https://${{ env.IICS_POD_HOST }}/api/core/v3/objects" \
               -H "INFA-SESSION-ID: $SESSION_ID" \
               -H "Accept: application/json" \
               -o target_objects.json
