@@ -51,21 +51,19 @@ jobs:
           name: iics-package
           path: exports/package_${{ github.sha }}.zip
 
-  # --- NEW JOB: Auto‑create PR from dev → uat after successful export ---
   create-pr-uat:
     name: Create PR dev → uat
     runs-on: ubuntu-latest
     needs: export
-    if: github.ref == 'refs/heads/dev'   # Only run on pushes to dev
+    if: github.ref == 'refs/heads/dev'
     steps:
       - uses: actions/checkout@v4
 
       - name: Check for existing PR from dev to uat
         id: check_pr
         env:
-          GH_TOKEN: ${{ secrets.PAT_FOR_PR }}   # Use a PAT to allow triggering other workflows
+          GH_TOKEN: ${{ secrets.PAT_FOR_PR }}
         run: |
-          # List open PRs from dev to uat
           PR_COUNT=$(gh pr list --head dev --base uat --state open --json number --jq 'length')
           if [ "$PR_COUNT" -gt 0 ]; then
             echo "PR already exists. Skipping creation."
@@ -132,10 +130,13 @@ jobs:
     needs: export
     if: github.ref == 'refs/heads/prod' || github.event.inputs.environment == 'prod'
     environment: production
+    # Grant write permission to contents so that GITHUB_TOKEN can push tags
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # required for version bumping
 
       - name: Download IICS CLI
         run: |
