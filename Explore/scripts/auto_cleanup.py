@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Post‑deployment cleanup: deletes objects in target environment not present in the package.
-Uses IICS CLI for listing (with fallback to direct API) and API for deletion.
+Uses exportMetadata.v2.json from the package to determine expected objects.
 """
 
 import sys
@@ -13,6 +13,7 @@ from typing import List, Dict, Set, Tuple
 
 # ----------------------------------------------------------------------
 # Configuration – map CLI type names to API endpoint paths
+# (API endpoints are under /saas/api/v2)
 # ----------------------------------------------------------------------
 TYPE_TO_ENDPOINT = {
     "MTT": "mttask",
@@ -24,8 +25,6 @@ TYPE_TO_ENDPOINT = {
     "Folder": "folder",
     "Project": "project"
 }
-# All types we care about for remote listing (used in API fallback)
-ALL_TYPES = list(TYPE_TO_ENDPOINT.keys())
 
 def login(login_url: str, username: str, password: str) -> str:
     """Login via API and return session ID."""
@@ -34,45 +33,25 @@ def login(login_url: str, username: str, password: str) -> str:
         raise Exception(f"Login failed: {resp.text}")
     return resp.json()["userInfo"]["sessionId"]
 
-def get_local_assets(workspace_path: str) -> Set[Tuple[str, str]]:
+def get_expected_objects_from_manifest(workspace_path: str) -> Set[Tuple[str, str]]:
     """
-    Scan the extracted workspace and return set of (type, name) from JSON files.
-    Also prints debug info.
+    Read exportMetadata.v2.json from the extracted workspace to get (type, name).
     """
-    assets = set()
-    if not os.path.isdir(workspace_path):
-        print(f"❌ Workspace path not found: {workspace_path}")
-        return assets
+    manifest_path = os.path.join(workspace_path, "exportMetadata.v2.json")
+    if not os.path.exists(manifest_path):
+        print(f"❌ Manifest not found: {manifest_path}")
+        return set()
 
-    print(f"🔍 Scanning workspace: {workspace_path}")
-    json_files_found = 0
-    for root, dirs, files in os.walk(workspace_path):
-        for file in files:
-            if not file.endswith(".json"):
-                continue
-            json_files_found += 1
-            filepath = os.path.join(root, file)
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                obj_type = data.get("type")
-                obj_name = data.get("name")
-                if obj_type and obj_name:
-                    assets.add((obj_type, obj_name))
-                    print(f"  📄 Found asset: {obj_type} '{obj_name}' in {file}")
-                else:
-                    print(f"  ⚠️ JSON missing type/name: {file}")
-            except Exception as e:
-                print(f"  ⚠️ Could not parse {file}: {e}")
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = json.load(f)
 
-    print(f"📊 JSON files found: {json_files_found}")
-    if json_files_found == 0:
-        # List all files in workspace to debug
-        print("📁 Workspace directory listing:")
-        for root, dirs, files in os.walk(workspace_path):
-            for file in files:
-                print(f"   {os.path.join(root, file)}")
-    return assets
+    expected = set()
+    for obj in manifest.get("exportedObjects", []):
+        obj_type = obj.get("objectType")
+        obj_name = obj.get("objectName")
+        if obj_type and obj_name:
+            expected.add((obj_type, obj_name))
+    return expected
 
 def get_remote_assets_via_cli(cli_path: str, region: str, pod_host: str,
                                username: str, password: str) -> List[Dict]:
@@ -94,7 +73,14 @@ def get_remote_assets_via_cli(cli_path: str, region: str, pod_host: str,
         print(f"❌ CLI list failed (exit {result.returncode})")
         print(f"STDERR: {result.stderr}")
         print(f"STDOUT: {result.stdout}")
-        return []   # fallback to API
+        return []
+
+    # Print CLI output for debugging
+    print("📤 CLI stdout:")
+    print(result.stdout)
+    if result.stderr:
+        print("📤 CLI stderr:")
+        print(result.stderr)
 
     # Parse output
     objects = []
@@ -131,22 +117,18 @@ def get_remote_assets_via_cli(cli_path: str, region: str, pod_host: str,
 def get_remote_assets_via_api(api_base: str, session_id: str) -> List[Dict]:
     """
     Fallback method: query each object type via IICS API.
-    Returns list of dicts with keys: type, name, id.
+    Uses api_base with /saas/api/v2.
     """
     headers = {"INFA-SESSION-ID": session_id, "Accept": "application/json"}
     objects = []
-    for obj_type in ALL_TYPES:
-        endpoint = TYPE_TO_ENDPOINT.get(obj_type)
-        if not endpoint:
-            continue
-        url = f"{api_base}/api/v2/{endpoint}"
+    for obj_type, endpoint in TYPE_TO_ENDPOINT.items():
+        url = f"{api_base}/{endpoint}"
         try:
             resp = requests.get(url, headers=headers, timeout=30)
             if resp.status_code != 200:
                 print(f"⚠️ API list for {obj_type} returned {resp.status_code}")
                 continue
             data = resp.json()
-            # The response may be a list or a dict with 'items'
             items = data if isinstance(data, list) else data.get("items", [])
             for item in items:
                 obj_name = item.get("name")
@@ -168,7 +150,7 @@ def delete_object(api_base: str, session_id: str, obj_type: str, obj_id: str) ->
     if not endpoint:
         print(f"⚠️ No delete endpoint for type {obj_type}, skipping.")
         return False
-    url = f"{api_base}/api/v2/{endpoint}/{obj_id}"
+    url = f"{api_base}/{endpoint}/{obj_id}"
     headers = {"INFA-SESSION-ID": session_id}
     try:
         resp = requests.delete(url, headers=headers, timeout=30)
@@ -191,7 +173,8 @@ def main():
     pod_host = os.getenv("IICS_POD_HOST", "apse1.dm-ap.informaticacloud.com")
 
     login_url = f"https://{login_host}/saas/public/core/v3/login"
-    api_base = f"https://{pod_host}"
+    # Correct API base for v2 endpoints is /saas/api/v2
+    api_base = f"https://{pod_host}/saas/api/v2"
 
     print("🔐 Logging in...")
     try:
@@ -201,9 +184,15 @@ def main():
         print(f"❌ Login failed: {e}")
         sys.exit(1)
 
-    print("📂 Extracting local assets from workspace...")
-    local_assets = get_local_assets(workspace_path)
-    print(f"📊 Local assets found: {len(local_assets)}")
+    print("📂 Reading expected objects from manifest...")
+    expected_objects = get_expected_objects_from_manifest(workspace_path)
+    print(f"📊 Expected objects: {len(expected_objects)}")
+    for obj in expected_objects:
+        print(f"   {obj[0]} '{obj[1]}'")
+
+    if not expected_objects:
+        print("⚠️ No expected objects found in manifest. Nothing to compare.")
+        return
 
     print("🌐 Listing remote assets...")
     # Try CLI first
@@ -221,7 +210,7 @@ def main():
         obj_type = obj["type"]
         obj_name = obj["name"]
         obj_id = obj["id"]
-        if (obj_type, obj_name) not in local_assets:
+        if (obj_type, obj_name) not in expected_objects:
             print(f"🗑️ Deleting orphan {obj_type} '{obj_name}' (ID: {obj_id})...")
             if delete_object(api_base, session_id, obj_type, obj_id):
                 deleted += 1

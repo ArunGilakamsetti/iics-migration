@@ -183,6 +183,13 @@ jobs:
           name: deployment-bundle
           path: artifacts
 
+      - name: Debug - List workspace contents
+        run: |
+          echo "Contents of artifacts/workspace_deploy:"
+          ls -la artifacts/workspace_deploy/
+          echo "JSON files found:"
+          find artifacts/workspace_deploy -name "*.json" | head -20          
+
       - name: Run Orphan Deletion Script
         env:
           IICS_LOGIN_HOST: dm-ap.informaticacloud.com
