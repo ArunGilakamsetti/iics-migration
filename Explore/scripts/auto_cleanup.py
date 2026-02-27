@@ -22,6 +22,10 @@ def get_local_assets(workspace_path: str) -> set:
     Scan the extracted workspace and return set of (type, name) from JSON files.
     """
     assets = set()
+    if not os.path.isdir(workspace_path):
+        print(f"Workspace path not found: {workspace_path}")
+        return assets
+
     for root, _, files in os.walk(workspace_path):
         for file in files:
             if not file.endswith(".json"):
@@ -34,7 +38,8 @@ def get_local_assets(workspace_path: str) -> set:
                 obj_name = data.get("name")
                 if obj_type and obj_name:
                     assets.add((obj_type, obj_name))
-            except:
+            except Exception as e:
+                print(f"Warning: Could not parse {filepath}: {e}")
                 continue
     return assets
 
@@ -50,13 +55,34 @@ def get_remote_assets_via_cli(cli_path: str, region: str, pod_host: str,
         "--podHostName", pod_host,
         "-u", username,
         "-p", password,
-        "-o", "remote_assets.txt"
+        "-o", "all_objects.txt"   # output file (may or may not be created)
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    # Run the command, capturing stdout/stderr
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"CLI list command failed with exit code {result.returncode}")
+        print(f"STDERR: {result.stderr}")
+        print(f"STDOUT: {result.stdout}")
+        raise Exception("CLI list failed")
 
+    # Try to read the output file if it exists (some CLI versions create it)
     objects = []
-    with open("remote_assets.txt", "r") as f:
-        for line in f:
+    if os.path.exists("all_objects.txt"):
+        with open("all_objects.txt", "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 3:
+                    objects.append({
+                        "type": parts[0],
+                        "name": parts[1],
+                        "id": parts[2]
+                    })
+    else:
+        # Fallback: parse from stdout (assuming same tab-separated format)
+        for line in result.stdout.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
@@ -117,8 +143,12 @@ def main():
     print(f"Found {len(local_assets)} local assets.")
 
     print("Listing remote assets via CLI...")
-    remote_objects = get_remote_assets_via_cli(cli_path, region, pod_host, username, password)
-    print(f"Found {len(remote_objects)} remote objects.")
+    try:
+        remote_objects = get_remote_assets_via_cli(cli_path, region, pod_host, username, password)
+        print(f"Found {len(remote_objects)} remote objects.")
+    except Exception as e:
+        print(f"Failed to list remote assets: {e}")
+        sys.exit(1)
 
     deleted = 0
     for obj in remote_objects:
