@@ -25,8 +25,7 @@ on:
 
 env:
   IICS_REGION: ap
-  IICS_LOGIN_HOST: dm-ap.informaticacloud.com        # host for login API
-  # Note: IICS_POD_HOST will be set per job where needed
+  IICS_POD_HOST: dm-ap.informaticacloud.com
 
 jobs:
   # --- JOB 1: PREPARE ---
@@ -41,6 +40,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          # Use caching to speed up subsequent runs
           cache: 'pip'
 
       - name: Install Dependencies
@@ -77,52 +77,10 @@ jobs:
             workspace_deploy/
           retention-days: 1
 
-  # --- JOB 2: CLEANUP (DELETE EXISTING PROJECTS) ---
-  cleanup:
-    name: Delete Existing Projects in ${{ inputs.environment }}
-    runs-on: ubuntu-latest
-    needs: prepare
-    environment: ${{ inputs.environment }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: pip install requests
-
-      - name: Download Prepared Package
-        uses: actions/download-artifact@v4
-        with:
-          name: deployment-bundle
-          path: artifacts
-
-      # Debug: list contents to verify
-      - name: Debug - List workspace contents
-        run: |
-          echo "Contents of artifacts/workspace_deploy:"
-          ls -la artifacts/workspace_deploy/
-          echo "JSON files found:"
-          find artifacts/workspace_deploy -name "*.json" | head -20
-
-      - name: Run Project Deletion Script
-        env:
-          IICS_LOGIN_HOST: ${{ env.IICS_LOGIN_HOST }}
-          IICS_POD_HOST: apse1.dm-ap.informaticacloud.com   # <-- actual pod host
-          PACKAGE_ZIP: artifacts/ready_to_deploy.zip
-        run: |
-          python3 Explore/scripts/auto_cleanup.py \
-            "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
-            "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}"
-
-  # --- JOB 3: IMPORT ---
+  # --- JOB 2: IMPORT ---
   import:
     name: Import to IICS
-    needs: cleanup        # must run after successful cleanup
+    needs: prepare
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
@@ -135,23 +93,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: deployment-bundle
-          path: ./
 
       - name: Execute IICS Import
         run: |
           ./iics import \
             -n "Deploy_${{ github.event.inputs.version }}_${{ github.run_id }}" \
             -r ${{ env.IICS_REGION }} \
-            --podHostName ${{ env.IICS_LOGIN_HOST }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
             -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
             -z ready_to_deploy.zip \
             -s true
 
-  # --- JOB 4: ROLLBACK (Only on Failure) ---
+  # --- JOB 3: ROLLBACK (Only on Failure) ---
   rollback:
     name: Emergency Rollback
-    needs: [prepare, import]   # depends on import, not cleanup (cleanup is before import)
+    needs: [prepare, import]
     if: failure() && github.event.inputs.previous_stable_version != ''
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
@@ -189,8 +146,65 @@ jobs:
           ./iics import \
             -n "ROLLBACK_to_${{ github.event.inputs.previous_stable_version }}" \
             -r ${{ env.IICS_REGION }} \
-            --podHostName ${{ env.IICS_LOGIN_HOST }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
             -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
             -z rollback_final.zip \
             -s true
+
+  # --- JOB 4: CLEANUP ---
+  cleanup:
+    name: Post Deploy Cleanup
+    needs: [prepare, import]
+    if: success()
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install requests
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download Workspace Metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-bundle
+          path: artifacts
+
+      - name: Debug - List workspace contents
+        run: |
+          echo "Contents of artifacts/workspace_deploy:"
+          ls -la artifacts/workspace_deploy/
+          echo "JSON files found:"
+          find artifacts/workspace_deploy -name "*.json" | head -20          
+
+      - name: Run Orphan Deletion Script
+        env:
+          IICS_LOGIN_HOST: dm-ap.informaticacloud.com
+          IICS_POD_HOST: apse1.dm-ap.informaticacloud.com   # <-- adjust to your pod
+        run: |
+          python3 Explore/scripts/auto_cleanup.py \
+            "${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}" \
+            "${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}" \
+            "./iics" \
+            "${{ env.IICS_REGION }}" \
+            "artifacts/workspace_deploy"
+
+      - name: Upload Cleanup Audit Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleanup-log
+          path: cleanup_audit.log   # (you need to add logging inside script if desired)
