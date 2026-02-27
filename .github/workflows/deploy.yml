@@ -112,7 +112,7 @@ jobs:
       - name: Run Project Deletion Script
         env:
           IICS_LOGIN_HOST: ${{ env.IICS_LOGIN_HOST }}
-          IICS_POD_HOST: dm-ap.informaticacloud.com   # <-- use login host
+          IICS_POD_HOST: apse1.dm-ap.informaticacloud.com   # <-- actual pod host
           PACKAGE_ZIP: artifacts/ready_to_deploy.zip
         run: |
           python3 Explore/scripts/auto_cleanup.py \
