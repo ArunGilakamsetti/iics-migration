@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Pre‑import cleanup: deletes projects in target environment that are present in the package.
-Uses baseApiUrl from login response for correct API endpoint.
+Uses baseApiUrl from login if available, otherwise constructs from pod host.
 """
 
 import sys
@@ -19,7 +19,7 @@ def login(login_url: str, username: str, password: str) -> tuple:
         raise Exception(f"Login failed: {resp.text}")
     data = resp.json()
     session_id = data["userInfo"]["sessionId"]
-    base_api_url = data["userInfo"].get("baseApiUrl")  # e.g., "https://apse1.dm-ap.informaticacloud.com/saas/api/v2"
+    base_api_url = data["userInfo"].get("baseApiUrl")  # may be None
     return session_id, base_api_url
 
 def get_manifest_projects(zip_path: str) -> Set[str]:
@@ -43,39 +43,40 @@ def get_manifest_projects(zip_path: str) -> Set[str]:
                         projects.add(proj_name)
             return projects
 
-def list_projects(api_base: str, session_id: str) -> List[Dict]:
-    """List all projects using the correct API base."""
-    # Try both with and without trailing slash
-    url = f"{api_base.rstrip('/')}/project"
+def list_projects(base_urls: List[str], session_id: str) -> List[Dict]:
+    """Try multiple base URLs to list projects."""
     headers = {"INFA-SESSION-ID": session_id, "Accept": "application/json"}
-    print(f"🔍 Listing projects at: {url}")
-    try:
-        resp = requests.get(url, headers=headers, timeout=30)
-        print(f"   → Status: {resp.status_code}")
-        if resp.status_code == 200:
-            data = resp.json()
-            projects = data if isinstance(data, list) else data.get("items", [])
-            return projects
-        else:
-            print(f"   Response: {resp.text[:200]}")
-    except Exception as e:
-        print(f"   ❌ Error: {e}")
+    for base in base_urls:
+        url = f"{base.rstrip('/')}/project"
+        print(f"🔍 Trying: {url}")
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            print(f"   → Status: {resp.status_code}")
+            if resp.status_code == 200:
+                data = resp.json()
+                projects = data if isinstance(data, list) else data.get("items", [])
+                return projects
+            else:
+                print(f"   Response: {resp.text[:200]}")
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
     return []
 
-def delete_project(api_base: str, session_id: str, project_id: str) -> bool:
-    """Delete a project by ID using the correct API base."""
-    url = f"{api_base.rstrip('/')}/project/{project_id}"
+def delete_project(base_urls: List[str], session_id: str, project_id: str) -> bool:
+    """Try multiple base URLs to delete a project."""
     headers = {"INFA-SESSION-ID": session_id}
-    print(f"🗑️ Deleting at: {url}")
-    try:
-        resp = requests.delete(url, headers=headers, timeout=30)
-        print(f"   → Status: {resp.status_code}")
-        if resp.status_code in (200, 204):
-            return True
-        else:
-            print(f"   Response: {resp.text[:200]}")
-    except Exception as e:
-        print(f"   ❌ Error: {e}")
+    for base in base_urls:
+        url = f"{base.rstrip('/')}/project/{project_id}"
+        print(f"🗑️ Trying delete: {url}")
+        try:
+            resp = requests.delete(url, headers=headers, timeout=30)
+            print(f"   → Status: {resp.status_code}")
+            if resp.status_code in (200, 204):
+                return True
+            else:
+                print(f"   Response: {resp.text[:200]}")
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
     return False
 
 def main():
@@ -85,17 +86,37 @@ def main():
 
     username, password = sys.argv[1:3]
     login_host = os.getenv("IICS_LOGIN_HOST", "dm-ap.informaticacloud.com")
+    pod_host = os.getenv("IICS_POD_HOST")
     zip_path = os.getenv("PACKAGE_ZIP", "ready_to_deploy.zip")
+
+    if not pod_host:
+        print("❌ IICS_POD_HOST environment variable not set.")
+        sys.exit(1)
 
     login_url = f"https://{login_host}/saas/public/core/v3/login"
 
     print("🔐 Logging in...")
     try:
-        session_id, api_base = login(login_url, username, password)
-        print(f"✅ Login successful. API base: {api_base}")
+        session_id, api_base_from_login = login(login_url, username, password)
+        print(f"✅ Login successful. API base from login: {api_base_from_login}")
     except Exception as e:
         print(f"❌ Login failed: {e}")
         sys.exit(1)
+
+    # Prepare list of base URLs to try
+    base_urls = []
+    if api_base_from_login:
+        base_urls.append(api_base_from_login)
+    # Always try constructed from pod host with common paths
+    base_urls.append(f"https://{pod_host}/saas/api/v2")
+    base_urls.append(f"https://{pod_host}/api/v2")
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_base_urls = []
+    for url in base_urls:
+        if url not in seen:
+            seen.add(url)
+            unique_base_urls.append(url)
 
     print("📦 Reading project names from manifest...")
     projects_to_delete = get_manifest_projects(zip_path)
@@ -105,7 +126,7 @@ def main():
     print(f"Projects to delete: {projects_to_delete}")
 
     print("🔍 Listing existing projects in target...")
-    all_projects = list_projects(api_base, session_id)
+    all_projects = list_projects(unique_base_urls, session_id)
     if not all_projects:
         print("No projects found in target. Nothing to delete.")
         return
@@ -118,7 +139,7 @@ def main():
     for proj_name in projects_to_delete:
         if proj_name in project_map:
             print(f"🗑️ Deleting project '{proj_name}' (ID: {project_map[proj_name]})...")
-            if delete_project(api_base, session_id, project_map[proj_name]):
+            if delete_project(unique_base_urls, session_id, project_map[proj_name]):
                 deleted += 1
                 print("   ✅ Deleted.")
             else:
