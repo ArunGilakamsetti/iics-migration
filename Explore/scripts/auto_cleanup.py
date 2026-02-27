@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Post‑deployment cleanup: deletes objects in target environment not present in the package.
-Uses exportMetadata.v2.json from the package to determine expected objects.
+Uses exportMetadata.v2.json from the package (extracted from ready_to_deploy.zip if needed).
 """
 
 import sys
@@ -9,6 +9,8 @@ import os
 import json
 import subprocess
 import requests
+import tempfile
+import zipfile
 from typing import List, Dict, Set, Tuple
 
 # ----------------------------------------------------------------------
@@ -33,18 +35,14 @@ def login(login_url: str, username: str, password: str) -> str:
         raise Exception(f"Login failed: {resp.text}")
     return resp.json()["userInfo"]["sessionId"]
 
-def get_expected_objects_from_manifest(workspace_path: str) -> Set[Tuple[str, str]]:
+def get_expected_objects_from_manifest(manifest_path: str) -> Set[Tuple[str, str]]:
     """
-    Read exportMetadata.v2.json from the extracted workspace to get (type, name).
+    Read exportMetadata.v2.json from the given path to get (type, name).
     """
-    manifest_path = os.path.join(workspace_path, "exportMetadata.v2.json")
     if not os.path.exists(manifest_path):
-        print(f"❌ Manifest not found: {manifest_path}")
         return set()
-
     with open(manifest_path, 'r', encoding='utf-8') as f:
         manifest = json.load(f)
-
     expected = set()
     for obj in manifest.get("exportedObjects", []):
         obj_type = obj.get("objectType")
@@ -52,6 +50,21 @@ def get_expected_objects_from_manifest(workspace_path: str) -> Set[Tuple[str, st
         if obj_type and obj_name:
             expected.add((obj_type, obj_name))
     return expected
+
+def extract_manifest_from_zip(zip_path: str) -> Set[Tuple[str, str]]:
+    """
+    Extract exportMetadata.v2.json from a zip file and return expected objects.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            # Look for exportMetadata.v2.json anywhere in the zip
+            manifest_members = [m for m in z.namelist() if m.endswith("exportMetadata.v2.json")]
+            if not manifest_members:
+                return set()
+            # Extract the first one found
+            z.extract(manifest_members[0], tmpdir)
+            manifest_path = os.path.join(tmpdir, manifest_members[0])
+            return get_expected_objects_from_manifest(manifest_path)
 
 def get_remote_assets_via_cli(cli_path: str, region: str, pod_host: str,
                                username: str, password: str) -> List[Dict]:
@@ -184,18 +197,34 @@ def main():
         print(f"❌ Login failed: {e}")
         sys.exit(1)
 
-    print("📂 Reading expected objects from manifest...")
-    expected_objects = get_expected_objects_from_manifest(workspace_path)
-    print(f"📊 Expected objects: {len(expected_objects)}")
+    # Step 1: Get expected objects from manifest
+    expected_objects = set()
+    manifest_path = os.path.join(workspace_path, "exportMetadata.v2.json")
+    if os.path.exists(manifest_path):
+        print(f"📂 Reading manifest from workspace: {manifest_path}")
+        expected_objects = get_expected_objects_from_manifest(manifest_path)
+    else:
+        print("⚠️ Manifest not found in workspace. Trying ready_to_deploy.zip...")
+        zip_path = os.path.join(os.path.dirname(workspace_path), "ready_to_deploy.zip")
+        if os.path.exists(zip_path):
+            expected_objects = extract_manifest_from_zip(zip_path)
+            if expected_objects:
+                print(f"✅ Found manifest in {zip_path}")
+            else:
+                print("⚠️ No manifest found in ready_to_deploy.zip.")
+        else:
+            print("⚠️ ready_to_deploy.zip not found.")
+
+    if not expected_objects:
+        print("❌ Could not determine expected objects. Nothing to compare.")
+        sys.exit(1)
+
+    print(f"📊 Expected objects from manifest: {len(expected_objects)}")
     for obj in expected_objects:
         print(f"   {obj[0]} '{obj[1]}'")
 
-    if not expected_objects:
-        print("⚠️ No expected objects found in manifest. Nothing to compare.")
-        return
-
+    # Step 2: List remote objects
     print("🌐 Listing remote assets...")
-    # Try CLI first
     remote_objects = get_remote_assets_via_cli(cli_path, region, pod_host, username, password)
     if len(remote_objects) == 0:
         print("⚠️ CLI returned zero objects, falling back to API...")
@@ -205,6 +234,7 @@ def main():
         print("⚠️ No remote objects found. Nothing to delete.")
         return
 
+    # Step 3: Delete orphans
     deleted = 0
     for obj in remote_objects:
         obj_type = obj["type"]
