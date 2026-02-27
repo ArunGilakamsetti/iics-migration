@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Pre‑import cleanup: deletes projects in target environment that are present in the package.
+Now tries multiple API base URLs and prints debug info.
 """
 
 import sys
@@ -40,22 +41,55 @@ def get_manifest_projects(zip_path: str) -> Set[str]:
             return projects
 
 def list_projects(api_base: str, session_id: str) -> List[Dict]:
-    """List all projects in target environment."""
-    url = f"{api_base}/project"
+    """Try to list projects using common endpoint variations."""
+    # Try multiple possible endpoints
+    endpoints_to_try = [
+        f"{api_base}/project",
+        f"{api_base}/projects",
+        f"{api_base}/api/v2/project",
+        f"{api_base}/api/v2/projects",
+        f"{api_base}/saas/api/v2/project",
+        f"{api_base}/saas/api/v2/projects",
+    ]
     headers = {"INFA-SESSION-ID": session_id, "Accept": "application/json"}
-    resp = requests.get(url, headers=headers)
-    if resp.status_code != 200:
-        print(f"⚠️ Failed to list projects: {resp.status_code}")
-        return []
-    data = resp.json()
-    return data if isinstance(data, list) else data.get("items", [])
+    for url in endpoints_to_try:
+        print(f"🔍 Trying: {url}")
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            print(f"   → Status: {resp.status_code}")
+            if resp.status_code == 200:
+                data = resp.json()
+                # Handle response format (list or dict with 'items')
+                projects = data if isinstance(data, list) else data.get("items", [])
+                if projects:
+                    print(f"✅ Found projects via {url}")
+                    return projects
+                else:
+                    print("   (empty list)")
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
+    return []
 
 def delete_project(api_base: str, session_id: str, project_id: str) -> bool:
-    """Delete a project by ID."""
-    url = f"{api_base}/project/{project_id}"
+    """Delete a project by ID. Try multiple endpoint variations."""
+    endpoints_to_try = [
+        f"{api_base}/project/{project_id}",
+        f"{api_base}/api/v2/project/{project_id}",
+        f"{api_base}/saas/api/v2/project/{project_id}",
+    ]
     headers = {"INFA-SESSION-ID": session_id}
-    resp = requests.delete(url, headers=headers)
-    return resp.status_code in (200, 204)
+    for url in endpoints_to_try:
+        print(f"🗑️ Trying delete: {url}")
+        try:
+            resp = requests.delete(url, headers=headers, timeout=10)
+            if resp.status_code in (200, 204):
+                print(f"   ✅ Deleted via {url}")
+                return True
+            else:
+                print(f"   → Status: {resp.status_code}")
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
+    return False
 
 def main():
     if len(sys.argv) < 3:
@@ -64,11 +98,12 @@ def main():
 
     username, password = sys.argv[1:3]
     login_host = os.getenv("IICS_LOGIN_HOST", "dm-ap.informaticacloud.com")
-    pod_host = os.getenv("IICS_POD_HOST", "apse1.dm-ap.informaticacloud.com")
-    zip_path = os.getenv("PACKAGE_ZIP", "ready_to_deploy.zip")  # set in workflow
+    pod_host = os.getenv("IICS_POD_HOST", login_host)  # fallback to login host
+    zip_path = os.getenv("PACKAGE_ZIP", "ready_to_deploy.zip")
 
     login_url = f"https://{login_host}/saas/public/core/v3/login"
-    api_base = f"https://{pod_host}/api/v2"  # try without /saas
+    # Base URL for API calls – try with just host (no path prefix)
+    api_base = f"https://{pod_host}"
 
     print("🔐 Logging in...")
     try:
@@ -93,6 +128,7 @@ def main():
 
     # Create name-to-id mapping
     project_map = {p["name"]: p["id"] for p in all_projects if "name" in p and "id" in p}
+    print(f"Found projects in target: {list(project_map.keys())}")
 
     deleted = 0
     for proj_name in projects_to_delete:
@@ -100,7 +136,6 @@ def main():
             print(f"🗑️ Deleting project '{proj_name}' (ID: {project_map[proj_name]})...")
             if delete_project(api_base, session_id, project_map[proj_name]):
                 deleted += 1
-                print("   ✅ Deleted.")
             else:
                 print(f"   ❌ Failed to delete {proj_name}.")
         else:
