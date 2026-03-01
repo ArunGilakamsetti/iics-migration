@@ -7,14 +7,9 @@ on:
         description: 'Release version (e.g., v1.2.3)'
         required: true
         type: string
-      project_path:
-        description: 'Project path in IICS (default: Explore/Project_Alpha.Project)'
-        required: false
-        default: 'Explore/Project_Alpha.Project'
-
 env:
   IICS_REGION: ap
-  IICS_POD_HOST: dm-ap.informaticacloud.com
+  IICS_POD_HOST: dm-ap.informaticacloud.com        
 
 jobs:
   export:
@@ -23,25 +18,46 @@ jobs:
     permissions:
       contents: write   # to create GitHub Release and upload assets
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate artifacts list (leaf assets only)
+        run: |
+          python scripts/generate_artifacts.py \
+            --explore-path Explore \
+            --output artifacts.txt
+          # To include folders or projects, add --include-folders or --include-projects
+          echo "Generated artifacts.txt:"
+          cat artifacts.txt
 
       - name: Download IICS CLI
         run: |
           curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
           chmod +x iics
+          ./iics version
 
-      - name: Export project from DEV
+      - name: Export IICS assets
         run: |
-          mkdir -p exports
           ./iics export \
-            -n "Export_${{ github.event.inputs.version }}" \
+            -n "Release_Export_${{ github.event.inputs.version }}" \
             -r ${{ env.IICS_REGION }} \
             --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets.DEV_IICS_USER }} \
             -p ${{ secrets.DEV_IICS_PWD }} \
-            -a "${{ github.event.inputs.project_path }}" \
-            -z exports/package_${{ github.event.inputs.version }}.zip \
+            -f artifacts.txt \
+            -z release-${{ github.event.inputs.version }}.zip \
             -s true
+
+      - name: Upload exported package
+        uses: actions/upload-artifact@v4
+        with:
+          name: iics-release-package
+          path: release-*.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -52,6 +68,6 @@ jobs:
             **IICS Assets exported from Dev**
             - Project: ${{ github.event.inputs.project_path }}
             - Triggered by: ${{ github.actor }}
-          files: exports/package_${{ github.event.inputs.version }}.zip
+          files: release-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
