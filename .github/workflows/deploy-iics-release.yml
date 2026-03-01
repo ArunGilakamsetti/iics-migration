@@ -1,6 +1,6 @@
 name: Deploy IICS Release
 
-run-name: Deploy IICS Release ${{ github.event_name == 'push' && format('(push to {0})', github.ref_name) || format('{0} to {1}', inputs.version, inputs.environment) }}
+run-name: Deploy IICS Release ${{ github.event_name == 'push' && github.ref_name || format('{0} to {1}', inputs.version, inputs.environment) }}
 
 on:
   push:
@@ -40,9 +40,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get latest release tag (for push events)
+      # For push events: get the latest release tag
+      - name: Get latest release tag (push)
         if: github.event_name == 'push'
-        id: get-latest-release
+        id: get-latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -54,19 +55,25 @@ jobs:
           echo "Latest release tag: $LATEST_TAG"
           echo "version=$LATEST_TAG" >> $GITHUB_OUTPUT
 
-      - name: Set version for manual dispatch
+      # For manual dispatch: use the provided version
+      - name: Set version from input
         if: github.event_name == 'workflow_dispatch'
-        id: set-version-manual
+        id: set-input
         run: echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
+      # Determine final version
       - name: Set final version
         id: set-version
         run: |
           if [ "${{ github.event_name }}" == "push" ]; then
-            echo "version=${{ steps.get-latest-release.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=${{ steps.get-latest.outputs.version }}" >> $GITHUB_OUTPUT
           else
-            echo "version=${{ steps.set-version-manual.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=${{ steps.set-input.outputs.version }}" >> $GITHUB_OUTPUT
           fi
+
+      # Debug: show the version that will be used
+      - name: Debug version
+        run: echo "Final version is ${{ steps.set-version.outputs.version }}"
 
       - name: Set environment
         id: set-env
@@ -135,7 +142,7 @@ jobs:
       - name: Debug - List workspace contents
         run: find workspace_deploy -type f | head -20
 
-      - name: Repackage with overrides (all projects)
+      - name: Repackage with overrides
         run: |
           ./iics package \
             -w workspace_deploy \
@@ -231,6 +238,14 @@ jobs:
         run: |
           gh release download ${{ needs.prepare-version.outputs.previous_stable_version }} --pattern "*.zip" --output rollback_package.zip
 
+      - name: Extract and Apply Overrides (Rollback)
+        run: |
+          mkdir -p workspace_rollback
+          ./iics extract -z rollback_package.zip -w workspace_rollback
+          python3 scripts/apply_mappings.py \
+            configs/${{ needs.prepare-version.outputs.environment }}_config.json \
+            workspace_rollback
+
       - name: Generate assets list for rollback
         run: |
           find workspace_rollback/Explore -name "*.Project.json" -not -path "*/.*" | sed 's|workspace_rollback/||; s|\.json$||' > workspace_rollback/assets.txt
@@ -238,16 +253,6 @@ jobs:
           cat workspace_rollback/assets.txt
           if [ ! -s workspace_rollback/assets.txt ]; then
             echo "No project assets found in rollback package!"
-            exit 1
-          fi
-
-      - name: Generate assets list for rollback
-        run: |
-          find workspace_rollback/Explore -name "*.Project.json" | sed 's|workspace_rollback/||; s|\.json$||' > workspace_rollback/assets.txt
-          echo "Rollback assets:"
-          cat workspace_rollback/assets.txt
-          if [ ! -s workspace_rollback/assets.txt ]; then
-            echo "❌ No project assets found in rollback package!"
             exit 1
           fi
 
