@@ -15,18 +15,26 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Create build script (if not already in repo)
+      - name: Debug - list Explore contents
         run: |
-          # This step is optional if you already have build_package.py in your repo.
-          # If you haven't added it yet, you can create it here.
-          cat > build_package.py << 'EOF'
-          # Paste the entire Python script from the previous answer here
-          # (or reference it from your repository)
-          EOF
+          echo "Contents of Explore folder:"
+          ls -la Explore/
+          echo "Recursive listing:"
+          find Explore -type f
 
-      - name: Build IICS package from Git
+      - name: Run build script
         run: |
           python build_package.py release.zip
+
+      - name: Debug - verify ZIP was created
+        run: |
+          if [ -f release.zip ]; then
+            echo "✅ release.zip exists"
+            ls -lh release.zip
+          else
+            echo "❌ release.zip not found"
+            exit 1
+          fi
 
       - name: Upload packaged ZIP
         uses: actions/upload-artifact@v4
