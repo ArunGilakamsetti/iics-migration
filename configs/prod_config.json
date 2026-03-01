@@ -1,13 +1,14 @@
 {
   "connectionOverrides": [
     {
-      "sourceName": "Sample Salesforce Connection",
-      "targetName": "Sample Salesforce Connection PROD"
-    },
-    {
-      "sourceName": "DEV_Target_Connection",
-      "targetName": "PROD_Target_Connection"
+      "sourceConnectionName": "Sample Salesforce Connection",
+      "targetConnectionName": "Sample Salesforce Connection PROD"
     }
   ],
-  "runtimeEnvironmentOverride": "PROD_Agent_Name"
+  "agentOverrides": [
+    {
+      "sourceAgentName": "Informatica Cloud Hosted Agent",
+      "targetAgentName": "Informatica Cloud Hosted Agent PROD"
+    }
+  ]
 }

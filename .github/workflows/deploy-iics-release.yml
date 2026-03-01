@@ -1,0 +1,289 @@
+name: Deploy IICS Release
+
+run-name: Deploy IICS Release ${{ inputs.version }} to ${{ inputs.environment }}
+
+on:
+  push:
+    branches: [ uat, prod ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'uat'
+        type: choice
+        options: [ uat, prod ]
+      previous_stable_version:
+        description: 'Version to rollback to if this fails'
+        required: false
+        type: string
+
+env:
+  IICS_REGION: ap
+  IICS_POD_HOST: dm-ap.informaticacloud.com
+  PROJECT_PATH: Explore/IICS_PROJECT   # Set this to your actual project path (without .Project.json)
+
+jobs:
+  # Determine the version to deploy based on trigger
+  prepare-version:
+    name: Prepare Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      environment: ${{ steps.set-env.outputs.environment }}
+      previous_stable_version: ${{ steps.set-previous.outputs.previous_stable_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed to get tags
+
+      - name: Get version for push event (from tag)
+        if: github.event_name == 'push'
+        id: get-version-push
+        run: |
+          TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
+          if [ -n "$TAG" ]; then
+            echo "version=$TAG" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set version for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: set-version-manual
+        run: echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+
+      - name: Set final version
+        id: set-version
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "version=${{ steps.get-version-push.outputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ steps.set-version-manual.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            ENV="${{ github.ref_name }}"
+          else
+            ENV="${{ github.event.inputs.environment }}"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+      - name: Set previous stable version (optional)
+        id: set-previous
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "previous_stable_version=${{ github.event.inputs.previous_stable_version }}" >> $GITHUB_OUTPUT
+
+  # --- JOB 1: PREPARE ---
+  prepare:
+    name: Prepare Environment Package
+    needs: prepare-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download ${{ needs.prepare-version.outputs.version }} --pattern "*.zip" --output package.zip
+
+      - name: Extract and Apply Overrides
+        run: |
+          mkdir -p workspace_deploy
+          ./iics extract -z package.zip -w workspace_deploy
+          python3 scripts/apply_mappings.py \
+            configs/${{ needs.prepare-version.outputs.environment }}_config.json \
+            workspace_deploy
+
+      - name: Repackage with overrides
+        run: |
+          ./iics package \
+            -w workspace_deploy \
+            -a "${{ env.PROJECT_PATH }}" \
+            -z ready_to_deploy.zip
+
+      - name: Upload Deployment Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-bundle
+          path: |
+            ready_to_deploy.zip
+            workspace_deploy/
+          retention-days: 1
+
+  # --- JOB 2: IMPORT ---
+  import:
+    name: Import to IICS
+    needs: [prepare-version, prepare]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.prepare-version.outputs.environment }}
+    steps:
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download Prepared Bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-bundle
+
+      - name: Execute IICS Import
+        run: |
+          ./iics import \
+            -n "Deploy_${{ needs.prepare-version.outputs.version }}_${{ github.run_id }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets[format('{0}_IICS_USER', needs.prepare-version.outputs.environment)] }} \
+            -p ${{ secrets[format('{0}_IICS_PWD', needs.prepare-version.outputs.environment)] }} \
+            -z ready_to_deploy.zip \
+            -s true
+
+  # --- JOB 3: CREATE PROMOTION PR (after UAT deployment) ---
+  create-promotion-pr:
+    name: Create PR uat → prod
+    runs-on: ubuntu-latest
+    needs: [prepare-version, import]
+    if: success() && needs.prepare-version.outputs.environment == 'uat'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Pull Request from uat to prod
+        env:
+          GH_TOKEN: ${{ secrets.PAT_FOR_PR }}
+        run: |
+          gh pr create \
+            --base prod \
+            --head uat \
+            --title "Auto PR: Promote release ${{ needs.prepare-version.outputs.version }} to prod" \
+            --body "This PR was automatically created after successful UAT deployment of version ${{ needs.prepare-version.outputs.version }}." \
+            --label "auto-pr,promotion" || echo "PR creation failed (maybe already exists)"
+
+  # --- JOB 4: ROLLBACK (Only on Failure) ---
+  rollback:
+    name: Emergency Rollback
+    needs: [prepare-version, prepare, import]
+    if: failure() && needs.prepare-version.outputs.previous_stable_version != ''
+    runs-on: ubuntu-latest
+    environment: ${{ needs.prepare-version.outputs.environment }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download Previous Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download ${{ needs.prepare-version.outputs.previous_stable_version }} --pattern "*.zip" --output rollback_package.zip
+
+      - name: Prepare and Deploy Rollback
+        run: |
+          mkdir -p workspace_rollback
+          ./iics extract -z rollback_package.zip -w workspace_rollback
+          python3 scripts/apply_mappings.py \
+            configs/${{ needs.prepare-version.outputs.environment }}_config.json \
+            workspace_rollback
+          ./iics package -w workspace_rollback -a "${{ env.PROJECT_PATH }}" -z rollback_final.zip
+          ./iics import \
+            -n "ROLLBACK_to_${{ needs.prepare-version.outputs.previous_stable_version }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets[format('{0}_IICS_USER', needs.prepare-version.outputs.environment)] }} \
+            -p ${{ secrets[format('{0}_IICS_PWD', needs.prepare-version.outputs.environment)] }} \
+            -z rollback_final.zip \
+            -s true
+
+  # --- JOB 5: CLEANUP ---
+  cleanup:
+    name: Post Deploy Cleanup
+    needs: [prepare-version, prepare, import]
+    if: success()
+    runs-on: ubuntu-latest
+    environment: ${{ needs.prepare-version.outputs.environment }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install requests
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download Workspace Metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-bundle
+          path: artifacts
+
+      - name: Debug - List workspace contents
+        run: |
+          echo "Contents of artifacts/workspace_deploy:"
+          ls -la artifacts/workspace_deploy/
+          echo "JSON files found:"
+          find artifacts/workspace_deploy -name "*.json" | head -20          
+
+      - name: Run Orphan Deletion Script
+        env:
+          IICS_LOGIN_HOST: dm-ap.informaticacloud.com
+          IICS_POD_HOST: apse1.dm-ap.informaticacloud.com
+        run: |
+          python3 scripts/auto_cleanup.py \
+            "${{ secrets[format('{0}_IICS_USER', needs.prepare-version.outputs.environment)] }}" \
+            "${{ secrets[format('{0}_IICS_PWD', needs.prepare-version.outputs.environment)] }}" \
+            "./iics" \
+            "${{ env.IICS_REGION }}" \
+            "artifacts/workspace_deploy"
+
+      - name: Upload Cleanup Audit Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleanup-log
+          path: cleanup_audit.log
