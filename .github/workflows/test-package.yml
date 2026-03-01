@@ -9,27 +9,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get latest IICS CLI release info
-        id: latest_release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download IICS CLI (raw binary)
         run: |
-          # Fetch latest release tag from the Tools repo
-          LATEST_TAG=$(curl -s https://api.github.com/repos/InformaticaCloudApplicationIntegration/Tools/releases/latest | jq -r .tag_name)
-          echo "Latest tag: $LATEST_TAG"
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
-      - name: Download IICS CLI
-        run: |
-          TAG="${{ steps.latest_release.outputs.tag }}"
-          URL="https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/${TAG}/linux-amd64.tar.gz"
-          echo "Downloading from: $URL"
-          curl -L -o iics.tar.gz "$URL"
-          tar -xzf iics.tar.gz
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2.0.1/linux-x86_64/iics
           chmod +x iics
-
-      - name: Verify CLI version
-        run: ./iics version
+          ./iics version
 
       - name: Debug - list files in Explore/FORVIA
         run: find Explore/FORVIA -type f
