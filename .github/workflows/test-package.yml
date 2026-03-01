@@ -1,35 +1,35 @@
-name: Test IICS Packaging
+name: Test IICS Packaging (Python)
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-package:
+  build-package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Download IICS CLI v2.0.5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Create build script (if not already in repo)
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.5/linux-amd64.tar.gz
-          tar -xzf iics.tar.gz
-          chmod +x iics
+          # This step is optional if you already have build_package.py in your repo.
+          # If you haven't added it yet, you can create it here.
+          cat > build_package.py << 'EOF'
+          # Paste the entire Python script from the previous answer here
+          # (or reference it from your repository)
+          EOF
 
-      - name: Verify CLI version
-        run: ./iics version
-
-      - name: Debug - list files in Explore/FORVIA
-        run: find Explore/FORVIA -type f
-
-      - name: Create artifacts file
-        run: echo "Explore/FORVIA/FORVIA.Project" > artifacts.txt
-
-      - name: Package using artifacts file
+      - name: Build IICS package from Git
         run: |
-          ./iics package -w . -f artifacts.txt -z release.zip
+          python build_package.py release.zip
 
       - name: Upload packaged ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: release-package
+          name: iics-release-package
           path: release.zip
