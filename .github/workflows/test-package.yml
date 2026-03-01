@@ -18,15 +18,39 @@ jobs:
       - name: Debug - list files in Explore/FORVIA
         run: find Explore/FORVIA -type f
 
-      - name: Create artifacts file
-        run: echo "Explore/FORVIA/FORVIA.Project" > artifacts.txt
+      # Attempt 1: Use artifacts file with base name (without .json)
+      - name: Create artifacts file (base name)
+        run: echo "Explore/FORVIA/FORVIA.Project" > artifacts1.txt
 
-      - name: Package using artifacts file
+      - name: Package using base name
         run: |
-          ./iics package -w . -f artifacts.txt -z release.zip
+          ./iics package -w . -f artifacts1.txt -z release1.zip || echo "Base name failed"
 
-      - name: Upload packaged ZIP
+      # Attempt 2: Use artifacts file with full .json extension
+      - name: Create artifacts file (full name)
+        run: echo "Explore/FORVIA/FORVIA.Project.json" > artifacts2.txt
+
+      - name: Package using full name
+        run: |
+          ./iics package -w . -f artifacts2.txt -z release2.zip || echo "Full name failed"
+
+      # Attempt 3: Use -a flag with full .json
+      - name: Package using -a with full .json
+        run: |
+          ./iics package -w . -a "Explore/FORVIA/FORVIA.Project.json" -z release3.zip || echo "-a with .json failed"
+
+      # Attempt 4: Use -a flag with folder (if folder asset exists)
+      - name: Package using -a with folder
+        run: |
+          ./iics package -w . -a "Explore/FORVIA/READ_CSV_FILES.Folder" -z release4.zip || echo "Folder attempt failed"
+
+      - name: Upload any successful packages
         uses: actions/upload-artifact@v4
         with:
-          name: release-package
-          path: release.zip
+          name: release-packages
+          path: |
+            release1.zip
+            release2.zip
+            release3.zip
+            release4.zip
+          if-no-files-found: warn
