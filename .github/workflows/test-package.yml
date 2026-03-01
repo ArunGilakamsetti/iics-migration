@@ -9,20 +9,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download IICS CLI (latest stable)
+      - name: Download IICS CLI v2.0.5
         run: |
-          # First, find the latest release tag dynamically (optional)
-          # For now, use v2.0.4 – replace with actual latest if different
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.4/linux-amd64.tar.gz
+          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.5/linux-amd64.tar.gz
           tar -xzf iics.tar.gz
           chmod +x iics
 
       - name: Verify CLI version
         run: ./iics version
 
+      - name: Debug - list files in Explore/FORVIA
+        run: find Explore/FORVIA -type f
+
       - name: Create artifacts file
-        run: |
-          echo "Explore/FORVIA/FORVIA.Project" > artifacts.txt
+        run: echo "Explore/FORVIA/FORVIA.Project" > artifacts.txt
 
       - name: Package using artifacts file
         run: |
