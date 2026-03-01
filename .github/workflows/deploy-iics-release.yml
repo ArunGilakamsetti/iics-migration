@@ -123,12 +123,12 @@ jobs:
 
       - name: Generate assets list (all projects)
         run: |
-          # Find all project files and convert to asset paths (remove workspace_deploy/ and .json)
-          find workspace_deploy/Explore -name "*.Project.json" | sed 's|workspace_deploy/||; s|\.json$||' > workspace_deploy/assets.txt
+          # Find all project files, excluding hidden files (starting with .)
+          find workspace_deploy/Explore -name "*.Project.json" -not -path "*/.*" | sed 's|workspace_deploy/||; s|\.json$||' > workspace_deploy/assets.txt
           echo "Assets to package:"
           cat workspace_deploy/assets.txt
           if [ ! -s workspace_deploy/assets.txt ]; then
-            echo "❌ No project assets found!"
+            echo "No project assets found!"
             exit 1
           fi
 
@@ -231,13 +231,15 @@ jobs:
         run: |
           gh release download ${{ needs.prepare-version.outputs.previous_stable_version }} --pattern "*.zip" --output rollback_package.zip
 
-      - name: Extract and Apply Overrides (Rollback)
+      - name: Generate assets list for rollback
         run: |
-          mkdir -p workspace_rollback
-          ./iics extract -z rollback_package.zip -w workspace_rollback
-          python3 scripts/apply_mappings.py \
-            configs/${{ needs.prepare-version.outputs.environment }}_config.json \
-            workspace_rollback
+          find workspace_rollback/Explore -name "*.Project.json" -not -path "*/.*" | sed 's|workspace_rollback/||; s|\.json$||' > workspace_rollback/assets.txt
+          echo "Rollback assets:"
+          cat workspace_rollback/assets.txt
+          if [ ! -s workspace_rollback/assets.txt ]; then
+            echo "No project assets found in rollback package!"
+            exit 1
+          fi
 
       - name: Generate assets list for rollback
         run: |
