@@ -1,0 +1,26 @@
+name: Test IICS Packaging
+
+on:
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  test-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Package IICS assets
+        run: |
+          ./iics package -w . -a "Explore/FORVIA/FORVIA.Project" -z release.zip
+
+      - name: Upload packaged ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: release.zip

@@ -1,0 +1,23 @@
+{
+  "objectInfo" : {
+    "id" : "47hxqUZCdOXhVADo6fUD6x",
+    "name" : "FORVIA",
+    "type" : "Project",
+    "metadata" : {
+      "modelVersion" : {
+        "major" : 0,
+        "minor" : 0
+      },
+      "repoInfo" : null,
+      "contextAttributes" : [ ],
+      "additionalInfo" : {
+        "description" : "",
+        "contentType" : "Binary",
+        "documentState" : "COMPLETE"
+      }
+    }
+  },
+  "dataFileExtension" : "json",
+  "updateTime" : "2024-05-23T08:57:09.214Z",
+  "objectRefs" : [ ]
+}
