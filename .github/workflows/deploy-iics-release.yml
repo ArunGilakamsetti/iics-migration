@@ -1,6 +1,6 @@
 name: Deploy IICS Release
 
-run-name: Deploy IICS Release ${{ inputs.version }} to ${{ inputs.environment }}
+run-name: Deploy IICS Release ${{ github.event_name == 'push' && github.ref_name || format('{0} to {1}', inputs.version, inputs.environment) }}
 
 on:
   push:
@@ -24,7 +24,6 @@ on:
 env:
   IICS_REGION: ap
   IICS_POD_HOST: dm-ap.informaticacloud.com
-  PROJECT_PATH: Explore/IICS_PROJECT   # Set this to your actual project path (without .Project.json)
 
 jobs:
   # Determine the version to deploy based on trigger
@@ -39,32 +38,42 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Needed to get tags
+          fetch-depth: 0
 
-      - name: Get version for push event (from tag)
+      # For push events: get the latest release tag
+      - name: Get latest release tag (push)
         if: github.event_name == 'push'
-        id: get-version-push
+        id: get-latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
-          if [ -n "$TAG" ]; then
-            echo "version=$TAG" >> $GITHUB_OUTPUT
-          else
-            echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No releases found in the repository."
+            exit 1
           fi
+          echo "Latest release tag: $LATEST_TAG"
+          echo "version=$LATEST_TAG" >> $GITHUB_OUTPUT
 
-      - name: Set version for manual dispatch
+      # For manual dispatch: use the provided version
+      - name: Set version from input
         if: github.event_name == 'workflow_dispatch'
-        id: set-version-manual
+        id: set-input
         run: echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
+      # Determine final version
       - name: Set final version
         id: set-version
         run: |
           if [ "${{ github.event_name }}" == "push" ]; then
-            echo "version=${{ steps.get-version-push.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=${{ steps.get-latest.outputs.version }}" >> $GITHUB_OUTPUT
           else
-            echo "version=${{ steps.set-version-manual.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=${{ steps.set-input.outputs.version }}" >> $GITHUB_OUTPUT
           fi
+
+      # Debug: show the version that will be used
+      - name: Debug version
+        run: echo "Final version is ${{ steps.set-version.outputs.version }}"
 
       - name: Set environment
         id: set-env
@@ -108,6 +117,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "Downloading release version: ${{ needs.prepare-version.outputs.version }}"
           gh release download ${{ needs.prepare-version.outputs.version }} --pattern "*.zip" --output package.zip
 
       - name: Extract and Apply Overrides
@@ -118,11 +128,25 @@ jobs:
             configs/${{ needs.prepare-version.outputs.environment }}_config.json \
             workspace_deploy
 
+      - name: Generate assets list (all projects)
+        run: |
+          # Find all project files, excluding hidden files (starting with .)
+          find workspace_deploy/Explore -name "*.Project.json" -not -path "*/.*" | sed 's|workspace_deploy/||; s|\.json$||' > workspace_deploy/assets.txt
+          echo "Assets to package:"
+          cat workspace_deploy/assets.txt
+          if [ ! -s workspace_deploy/assets.txt ]; then
+            echo "No project assets found!"
+            exit 1
+          fi
+
+      - name: Debug - List workspace contents
+        run: find workspace_deploy -type f | head -20
+
       - name: Repackage with overrides
         run: |
           ./iics package \
             -w workspace_deploy \
-            -a "${{ env.PROJECT_PATH }}" \
+            -f workspace_deploy/assets.txt \
             -z ready_to_deploy.zip
 
       - name: Upload Deployment Artifacts
@@ -214,14 +238,33 @@ jobs:
         run: |
           gh release download ${{ needs.prepare-version.outputs.previous_stable_version }} --pattern "*.zip" --output rollback_package.zip
 
-      - name: Prepare and Deploy Rollback
+      - name: Extract and Apply Overrides (Rollback)
         run: |
           mkdir -p workspace_rollback
           ./iics extract -z rollback_package.zip -w workspace_rollback
           python3 scripts/apply_mappings.py \
             configs/${{ needs.prepare-version.outputs.environment }}_config.json \
             workspace_rollback
-          ./iics package -w workspace_rollback -a "${{ env.PROJECT_PATH }}" -z rollback_final.zip
+
+      - name: Generate assets list for rollback
+        run: |
+          find workspace_rollback/Explore -name "*.Project.json" -not -path "*/.*" | sed 's|workspace_rollback/||; s|\.json$||' > workspace_rollback/assets.txt
+          echo "Rollback assets:"
+          cat workspace_rollback/assets.txt
+          if [ ! -s workspace_rollback/assets.txt ]; then
+            echo "No project assets found in rollback package!"
+            exit 1
+          fi
+
+      - name: Repackage Rollback
+        run: |
+          ./iics package \
+            -w workspace_rollback \
+            -f workspace_rollback/assets.txt \
+            -z rollback_final.zip
+
+      - name: Import Rollback
+        run: |
           ./iics import \
             -n "ROLLBACK_to_${{ needs.prepare-version.outputs.previous_stable_version }}" \
             -r ${{ env.IICS_REGION }} \
@@ -262,14 +305,14 @@ jobs:
           name: deployment-bundle
           path: artifacts
 
-      - name: Debug - List workspace contents
+      - name: Debug - List downloaded files
         run: |
-          echo "Contents of artifacts/workspace_deploy:"
-          ls -la artifacts/workspace_deploy/
-          echo "JSON files found:"
-          find artifacts/workspace_deploy -name "*.json" | head -20          
+          echo "Contents of artifacts/:"
+          ls -la artifacts/
+          echo "Contents of artifacts/workspace_deploy/:"
+          ls -la artifacts/workspace_deploy/ || echo "workspace_deploy not found"
 
-      - name: Run Orphan Deletion Script
+      - name: Run Orphan Deletion Script (with explicit zip path)
         env:
           IICS_LOGIN_HOST: dm-ap.informaticacloud.com
           IICS_POD_HOST: apse1.dm-ap.informaticacloud.com
@@ -279,11 +322,5 @@ jobs:
             "${{ secrets[format('{0}_IICS_PWD', needs.prepare-version.outputs.environment)] }}" \
             "./iics" \
             "${{ env.IICS_REGION }}" \
-            "artifacts/workspace_deploy"
-
-      - name: Upload Cleanup Audit Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cleanup-log
-          path: cleanup_audit.log
+            "artifacts/workspace_deploy" \
+            --zip-path "artifacts/ready_to_deploy.zip"
