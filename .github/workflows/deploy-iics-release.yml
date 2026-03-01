@@ -39,17 +39,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Needed to get tags
+          fetch-depth: 0  # Needed to get tags (though we're not using them now)
 
-      - name: Get version for push event (from tag)
+      - name: Get version for push event (from LATEST_RELEASE file)
         if: github.event_name == 'push'
         id: get-version-push
         run: |
-          TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
-          if [ -n "$TAG" ]; then
-            echo "version=$TAG" >> $GITHUB_OUTPUT
+          if [ -f LATEST_RELEASE ]; then
+            VERSION=$(cat LATEST_RELEASE)
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
           else
-            echo "version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            echo "No LATEST_RELEASE file found. Please ensure the release workflow has run and committed the file."
+            exit 1
           fi
 
       - name: Set version for manual dispatch
