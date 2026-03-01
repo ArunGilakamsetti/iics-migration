@@ -22,6 +22,119 @@ jobs:
           echo "Recursive listing:"
           find Explore -type f
 
+      - name: Create build_package.py
+        run: |
+          cat > build_package.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          Builds an IICS import ZIP from the Explore folder.
+          Scans the workspace, generates exportMetadata.v2.json, and creates a package.
+          """
+
+          import os
+          import json
+          import zipfile
+          import sys
+          from pathlib import Path
+
+          # Mapping of file extensions to IICS object types
+          EXTENSION_TO_TYPE = {
+              '.Project.json': 'Project',
+              '.Folder.json': 'Folder',
+              '.MTT.zip': 'MTT',
+              '.DTEMPLATE.zip': 'DTEMPLATE',
+          }
+
+          def collect_objects(workspace_root):
+              """Walk the workspace/Explore folder and collect all asset files."""
+              objects = []
+              explore_path = os.path.join(workspace_root, 'Explore')
+              print(f"Scanning {explore_path}...")
+              if not os.path.isdir(explore_path):
+                  print(f"❌ Explore folder not found at {explore_path}")
+                  return None
+
+              for root, dirs, files in os.walk(explore_path):
+                  for file in files:
+                      file_path = os.path.join(root, file)
+                      rel_path = os.path.relpath(file_path, workspace_root).replace('\\', '/')
+
+                      # Determine object type based on file extension
+                      obj_type = None
+                      name = None
+                      for ext, typ in EXTENSION_TO_TYPE.items():
+                          if file.endswith(ext):
+                              obj_type = typ
+                              if ext.endswith('.zip'):
+                                  base = file[:-4]  # remove .zip
+                                  parts = base.split('.')
+                                  if len(parts) >= 2:
+                                      name = '.'.join(parts[:-1])
+                                  else:
+                                      name = base
+                              else:
+                                  name = file.replace(ext, '')
+                              break
+
+                      if obj_type and name:
+                          objects.append({
+                              "objectName": name,
+                              "objectType": obj_type,
+                              "path": rel_path
+                          })
+                          print(f"  Found: {obj_type} '{name}' at {rel_path}")
+                      else:
+                          print(f"⚠️ Skipping unrecognized file: {file_path}")
+
+              return objects
+
+          def create_package(workspace_root, output_zip):
+              """Generate manifest and zip everything into a package."""
+              print("Collecting objects...")
+              objects = collect_objects(workspace_root)
+              if objects is None:
+                  sys.exit(1)
+              if not objects:
+                  print("❌ No objects found. Aborting.")
+                  sys.exit(1)
+
+              print(f"Generating manifest with {len(objects)} objects...")
+              manifest = {
+                  "name": "Export_from_Git",
+                  "sourceOrgId": "git",
+                  "sourceOrgName": "GitRepo",
+                  "exportedObjects": objects
+              }
+              manifest_path = os.path.join(workspace_root, "exportMetadata.v2.json")
+              with open(manifest_path, 'w') as f:
+                  json.dump(manifest, f, indent=2)
+
+              print(f"Creating package: {output_zip}...")
+              with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                  zipf.write(manifest_path, arcname="exportMetadata.v2.json")
+                  explore_path = os.path.join(workspace_root, 'Explore')
+                  for root, dirs, files in os.walk(explore_path):
+                      for file in files:
+                          full_path = os.path.join(root, file)
+                          arcname = os.path.relpath(full_path, workspace_root)
+                          zipf.write(full_path, arcname)
+
+              os.remove(manifest_path)
+              print(f"✅ Package created successfully: {output_zip}")
+              if os.path.exists(output_zip):
+                  print(f"File size: {os.path.getsize(output_zip)} bytes")
+              else:
+                  print("❌ File was not created!")
+                  sys.exit(1)
+
+          if __name__ == "__main__":
+              if len(sys.argv) > 1:
+                  output_zip = sys.argv[1]
+              else:
+                  output_zip = "release.zip"
+              create_package(".", output_zip)
+          EOF
+
       - name: Run build script
         run: |
           python build_package.py release.zip
