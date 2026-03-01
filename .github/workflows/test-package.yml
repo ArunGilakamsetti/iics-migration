@@ -9,9 +9,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download IICS CLI v2.0.5
+      - name: Get latest IICS CLI release info
+        id: latest_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -L -o iics.tar.gz https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/v2.0.5/linux-amd64.tar.gz
+          # Fetch latest release tag from the Tools repo
+          LATEST_TAG=$(curl -s https://api.github.com/repos/InformaticaCloudApplicationIntegration/Tools/releases/latest | jq -r .tag_name)
+          echo "Latest tag: $LATEST_TAG"
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download IICS CLI
+        run: |
+          TAG="${{ steps.latest_release.outputs.tag }}"
+          URL="https://github.com/InformaticaCloudApplicationIntegration/Tools/releases/download/${TAG}/linux-amd64.tar.gz"
+          echo "Downloading from: $URL"
+          curl -L -o iics.tar.gz "$URL"
           tar -xzf iics.tar.gz
           chmod +x iics
 
