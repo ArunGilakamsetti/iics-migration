@@ -1,6 +1,6 @@
 name: Deploy IICS Release
 
-run-name: Deploy IICS Release ${{ inputs.version }} to ${{ inputs.environment }}
+run-name: Deploy IICS Release ${{ github.event_name == 'push' && format('(push to {0})', github.ref_name) || format('{0} to {1}', inputs.version, inputs.environment) }}
 
 on:
   push:
@@ -39,19 +39,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Needed to get tags (though we're not using them now)
+          fetch-depth: 0
 
-      - name: Get version for push event (from LATEST_RELEASE file)
+      - name: Get latest release tag (for push events)
         if: github.event_name == 'push'
-        id: get-version-push
+        id: get-latest-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -f LATEST_RELEASE ]; then
-            VERSION=$(cat LATEST_RELEASE)
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-          else
-            echo "No LATEST_RELEASE file found. Please ensure the release workflow has run and committed the file."
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No releases found in the repository."
             exit 1
           fi
+          echo "Latest release tag: $LATEST_TAG"
+          echo "version=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Set version for manual dispatch
         if: github.event_name == 'workflow_dispatch'
@@ -62,7 +64,7 @@ jobs:
         id: set-version
         run: |
           if [ "${{ github.event_name }}" == "push" ]; then
-            echo "version=${{ steps.get-version-push.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=${{ steps.get-latest-release.outputs.version }}" >> $GITHUB_OUTPUT
           else
             echo "version=${{ steps.set-version-manual.outputs.version }}" >> $GITHUB_OUTPUT
           fi
@@ -109,6 +111,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "Downloading release version: ${{ needs.prepare-version.outputs.version }}"
           gh release download ${{ needs.prepare-version.outputs.version }} --pattern "*.zip" --output package.zip
 
       - name: Extract and Apply Overrides
