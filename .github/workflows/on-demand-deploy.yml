@@ -1,22 +1,10 @@
 name: On‑demand Deployment
 
-run-name: Deploy to ${{ inputs.environment }} ${{ inputs.object_file && format('(using file {0})', inputs.object_file) || '(custom objects)' }}
+run-name: Deploy to ${{ inputs.environment }} (using configs/hotfix-objects.txt)
 
 on:
   workflow_dispatch:
     inputs:
-      object_file:
-        description: |
-          Path to a file in the repository containing the list of objects (one per line). 
-          Example: configs/hotfix-objects.txt
-        required: false
-        type: string
-      objects:
-        description: |
-          Alternatively, paste the list of objects here (one per line). 
-          Ignored if object_file is provided.
-        required: false
-        type: string
       environment:
         description: 'Target Environment'
         required: true
@@ -29,7 +17,7 @@ env:
   IICS_POD_HOST: dm-ap.informaticacloud.com
 
 jobs:
-  # ---- JOB 1: Prepare export list ----
+  # ---- JOB 1: Prepare export list from fixed file ----
   prepare-export:
     name: Prepare Objects List
     runs-on: ubuntu-latest
@@ -37,26 +25,16 @@ jobs:
       - name: Checkout repository (branch selected in workflow_dispatch)
         uses: actions/checkout@v4
 
-      - name: Generate artifacts file
-        id: generate
+      - name: Read object list from configs/hotfix-objects.txt
+        id: read_file
         run: |
-          if [ -n "${{ github.event.inputs.object_file }}" ]; then
-            # Read from file (path relative to repo root)
-            if [ ! -f "${{ github.event.inputs.object_file }}" ]; then
-              echo "File not found: ${{ github.event.inputs.object_file }}"
-              exit 1
-            fi
-            cp "${{ github.event.inputs.object_file }}" artifacts.txt
-            echo "Using object list from file: ${{ github.event.inputs.object_file }}"
-          elif [ -n "${{ github.event.inputs.objects }}" ]; then
-            # Use multiline input
-            printf "%s\n" "${{ github.event.inputs.objects }}" > artifacts.txt
-            echo "Using manually provided object list"
-          else
-            echo "Either object_file or objects must be provided"
+          FILE="configs/hotfix-objects.txt"
+          if [ ! -f "$FILE" ]; then
+            echo "Required file $FILE not found in this branch!"
             exit 1
           fi
-          echo "Objects to export:"
+          cp "$FILE" artifacts.txt
+          echo "Objects to export (from $FILE):"
           cat artifacts.txt
 
       - name: Upload export list
