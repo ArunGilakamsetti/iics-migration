@@ -1,2 +1,2 @@
-Explore/Test_Project.Project
-Explore/Alpha_Project/Dev_Work/m_Test_Migration.DTEMPLATE
+Explore/Project_Alpha/Dev_Work/m_Test_Migration.DTEMPLATE
+Explore/Project_Alpha/Dev_Work/mt_Test_Migration_test_1.MTT
