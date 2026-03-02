@@ -1,12 +1,12 @@
 name: On‑demand Deployment
 
-run-name: Deploy to ${{ inputs.environment }} (using configs/hotfix-objects.txt)
+run-name: Hotfix Deploy to ${{ inputs.environment }}
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target Environment'
+        description: 'Target Environment' 
         required: true
         default: 'uat'
         type: choice
