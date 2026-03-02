@@ -1,6 +1,6 @@
 name: On‑demand Deployment
 
-run-name: Deploy to ${{ inputs.environment }} (using configs/hotfix-objects.txt)
+run-name: Hotfix Deploy to ${{ inputs.environment }}
 
 on:
   workflow_dispatch:
@@ -17,9 +17,9 @@ env:
   IICS_POD_HOST: dm-ap.informaticacloud.com
 
 jobs:
-  # ---- JOB 1: Prepare export list from fixed file ----
-  prepare-export:
-    name: Prepare Objects List
+  # ---- JOB 1: Read object list from fixed file ----
+  read-objects:
+    name: Read Object List
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (branch selected in workflow_dispatch)
@@ -44,9 +44,9 @@ jobs:
           path: artifacts.txt
 
   # ---- JOB 2: Export from Dev ----
-  export-assets:
+  export-from-dev:
     name: Export from Dev
-    needs: prepare-export
+    needs: read-objects
     runs-on: ubuntu-latest
     environment: development
     steps:
@@ -81,9 +81,9 @@ jobs:
           path: exported.zip
 
   # ---- JOB 3: Prepare deployment package (override + repackage) ----
-  prepare-deploy:
-    name: Prepare for ${{ github.event.inputs.environment }}
-    needs: export-assets
+  build-package:
+    name: Build Package for ${{ github.event.inputs.environment }}
+    needs: export-from-dev
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (again, for config files)
@@ -146,7 +146,7 @@ jobs:
   # ---- JOB 4: Deploy to target environment ----
   deploy:
     name: Deploy to ${{ github.event.inputs.environment }}
-    needs: prepare-deploy
+    needs: build-package
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
