@@ -1,18 +1,21 @@
 name: On‑demand Deployment
 
-run-name: Deploy to ${{ inputs.environment }} ${{ github.event.inputs.objects && format('(custom objects)', '') || '' }}
+run-name: Deploy to ${{ inputs.environment }} ${{ inputs.object_file && format('(using file {0})', inputs.object_file) || '(custom objects)' }}
 
 on:
   workflow_dispatch:
     inputs:
+      object_file:
+        description: |
+          Path to a file in the repository containing the list of objects (one per line). 
+          Example: configs/hotfix-objects.txt
+        required: false
+        type: string
       objects:
         description: |
-          List of objects to export and deploy (one per line). 
-          Use paths relative to workspace, e.g.:
-          Explore/Project_Alpha.Project
-          Explore/AnotherProject/SomeMapping.MTT
-          Explore/SharedFolder.Folder
-        required: true
+          Alternatively, paste the list of objects here (one per line). 
+          Ignored if object_file is provided.
+        required: false
         type: string
       environment:
         description: 'Target Environment'
@@ -31,12 +34,28 @@ jobs:
     name: Prepare Objects List
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (branch selected in workflow_dispatch)
         uses: actions/checkout@v4
 
-      - name: Create artifacts file from input
+      - name: Generate artifacts file
+        id: generate
         run: |
-          printf "%s\n" "${{ github.event.inputs.objects }}" > artifacts.txt
+          if [ -n "${{ github.event.inputs.object_file }}" ]; then
+            # Read from file (path relative to repo root)
+            if [ ! -f "${{ github.event.inputs.object_file }}" ]; then
+              echo "File not found: ${{ github.event.inputs.object_file }}"
+              exit 1
+            fi
+            cp "${{ github.event.inputs.object_file }}" artifacts.txt
+            echo "Using object list from file: ${{ github.event.inputs.object_file }}"
+          elif [ -n "${{ github.event.inputs.objects }}" ]; then
+            # Use multiline input
+            printf "%s\n" "${{ github.event.inputs.objects }}" > artifacts.txt
+            echo "Using manually provided object list"
+          else
+            echo "Either object_file or objects must be provided"
+            exit 1
+          fi
           echo "Objects to export:"
           cat artifacts.txt
 
@@ -89,7 +108,7 @@ jobs:
     needs: export-assets
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (again, for config files)
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -129,7 +148,7 @@ jobs:
           echo "Assets to deploy:"
           cat workspace_deploy/assets.txt
           if [ ! -s workspace_deploy/assets.txt ]; then
-            echo "❌ No project assets found!"
+            echo "No project assets found!"
             exit 1
           fi
 
