@@ -1,4 +1,6 @@
-name: Hotfix Deploy
+name: On‑demand Deployment
+
+run-name: Deploy to ${{ inputs.environment }} ${{ github.event.inputs.objects && format('(custom objects)', '') || '' }}
 
 on:
   workflow_dispatch:
@@ -34,7 +36,7 @@ jobs:
 
       - name: Create artifacts file from input
         run: |
-          echo "${{ github.event.inputs.objects }}" > artifacts.txt
+          printf "%s\n" "${{ github.event.inputs.objects }}" > artifacts.txt
           echo "Objects to export:"
           cat artifacts.txt
 
@@ -66,7 +68,7 @@ jobs:
       - name: Export IICS assets
         run: |
           ./iics export \
-            -n "Hotfix_Export_${{ github.run_id }}" \
+            -n "Deploy_Export_${{ github.run_id }}" \
             -r ${{ env.IICS_REGION }} \
             --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets.DEV_IICS_USER }} \
@@ -127,7 +129,7 @@ jobs:
           echo "Assets to deploy:"
           cat workspace_deploy/assets.txt
           if [ ! -s workspace_deploy/assets.txt ]; then
-            echo "No project assets found!"
+            echo "❌ No project assets found!"
             exit 1
           fi
 
@@ -165,7 +167,7 @@ jobs:
       - name: Import to ${{ github.event.inputs.environment }}
         run: |
           ./iics import \
-            -n "Hotfix_Deploy_${{ github.run_id }}" \
+            -n "Deploy_${{ github.run_id }}" \
             -r ${{ env.IICS_REGION }} \
             --podHostName ${{ env.IICS_POD_HOST }} \
             -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
