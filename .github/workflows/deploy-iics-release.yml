@@ -40,7 +40,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # For push events: get the latest release tag
       - name: Get latest release tag (push)
         if: github.event_name == 'push'
         id: get-latest
@@ -55,13 +54,11 @@ jobs:
           echo "Latest release tag: $LATEST_TAG"
           echo "version=$LATEST_TAG" >> $GITHUB_OUTPUT
 
-      # For manual dispatch: use the provided version
       - name: Set version from input
         if: github.event_name == 'workflow_dispatch'
         id: set-input
         run: echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
-      # Determine final version
       - name: Set final version
         id: set-version
         run: |
@@ -71,7 +68,6 @@ jobs:
             echo "version=${{ steps.set-input.outputs.version }}" >> $GITHUB_OUTPUT
           fi
 
-      # Debug: show the version that will be used
       - name: Debug version
         run: echo "Final version is ${{ steps.set-version.outputs.version }}"
 
@@ -130,7 +126,6 @@ jobs:
 
       - name: Generate assets list (all projects)
         run: |
-          # Find all project files, excluding hidden files (starting with .)
           find workspace_deploy/Explore -name "*.Project.json" -not -path "*/.*" | sed 's|workspace_deploy/||; s|\.json$||' > workspace_deploy/assets.txt
           echo "Assets to package:"
           cat workspace_deploy/assets.txt
@@ -138,6 +133,19 @@ jobs:
             echo "No project assets found!"
             exit 1
           fi
+
+      # NEW: Extract taskflow names for later publishing
+      - name: Extract taskflow names
+        run: |
+          find workspace_deploy/Explore -name "*.TASKFLOW.xml" | sed 's|.*/||; s|\.TASKFLOW\.xml$||' > workspace_deploy/taskflows.txt || true
+          echo "Taskflows to publish:"
+          cat workspace_deploy/taskflows.txt
+
+      - name: Upload taskflow list
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskflow-list
+          path: workspace_deploy/taskflows.txt
 
       - name: Debug - List workspace contents
         run: find workspace_deploy -type f | head -20
@@ -206,6 +214,46 @@ jobs:
             --title "Auto PR: Promote release ${{ needs.prepare-version.outputs.version }} to prod" \
             --body "This PR was automatically created after successful UAT deployment of version ${{ needs.prepare-version.outputs.version }}." \
             --label "auto-pr,promotion" || echo "PR creation failed (maybe already exists)"
+
+  # NEW: Publish Taskflows after successful import
+  publish-taskflows:
+    name: Publish Taskflows
+    needs: [prepare-version, import]
+    if: success()
+    runs-on: ubuntu-latest
+    environment: ${{ needs.prepare-version.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Download taskflow list
+        uses: actions/download-artifact@v4
+        with:
+          name: taskflow-list
+          path: ./
+
+      - name: Run publish script
+        env:
+          IICS_POD_HOST: ${{ env.IICS_POD_HOST }}
+        run: |
+          if [ -s taskflows.txt ]; then
+            python scripts/publish_taskflows.py \
+              "${{ secrets[format('{0}_IICS_USER', needs.prepare-version.outputs.environment)] }}" \
+              "${{ secrets[format('{0}_IICS_PWD', needs.prepare-version.outputs.environment)] }}" \
+              "${{ env.IICS_POD_HOST }}" \
+              "${{ env.IICS_REGION }}" \
+              $(cat taskflows.txt)
+          else
+            echo "No taskflows to publish."
+          fi
 
   # --- JOB 4: ROLLBACK (Only on Failure) ---
   rollback:
