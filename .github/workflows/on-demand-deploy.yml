@@ -1,0 +1,173 @@
+name: On‑demand Deployment
+
+run-name: Hotfix Deploy to ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'uat'
+        type: choice
+        options: [ uat, prod ]
+
+env:
+  IICS_REGION: ap
+  IICS_POD_HOST: dm-ap.informaticacloud.com
+
+jobs:
+  # ---- JOB 1: Read object list from fixed file ----
+  read-objects:
+    name: Read Object List
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (branch selected in workflow_dispatch)
+        uses: actions/checkout@v4
+
+      - name: Read object list from configs/hotfix-objects.txt
+        id: read_file
+        run: |
+          FILE="configs/hotfix-objects.txt"
+          if [ ! -f "$FILE" ]; then
+            echo "Required file $FILE not found in this branch!"
+            exit 1
+          fi
+          cp "$FILE" artifacts.txt
+          echo "Objects to export (from $FILE):"
+          cat artifacts.txt
+
+      - name: Upload export list
+        uses: actions/upload-artifact@v4
+        with:
+          name: export-list
+          path: artifacts.txt
+
+  # ---- JOB 2: Export from Dev ----
+  export-from-dev:
+    name: Export from Dev
+    needs: read-objects
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Download export list
+        uses: actions/download-artifact@v4
+        with:
+          name: export-list
+          path: ./
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+          ./iics version
+
+      - name: Export IICS assets
+        run: |
+          ./iics export \
+            -n "Deploy_Export_${{ github.run_id }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets.DEV_IICS_USER }} \
+            -p ${{ secrets.DEV_IICS_PWD }} \
+            -f artifacts.txt \
+            -z exported.zip \
+            -s true
+
+      - name: Upload exported package
+        uses: actions/upload-artifact@v4
+        with:
+          name: exported-package
+          path: exported.zip
+
+  # ---- JOB 3: Prepare deployment package (override + repackage) ----
+  build-package:
+    name: Build Package for ${{ github.event.inputs.environment }}
+    needs: export-from-dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (again, for config files)
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download exported package
+        uses: actions/download-artifact@v4
+        with:
+          name: exported-package
+          path: ./
+
+      - name: Extract package
+        run: |
+          mkdir -p workspace_deploy
+          ./iics extract -z exported.zip -w workspace_deploy
+
+      - name: Apply environment overrides
+        run: |
+          python3 scripts/apply_mappings.py \
+            configs/${{ github.event.inputs.environment }}_config.json \
+            workspace_deploy
+
+      - name: Generate assets list from workspace
+        run: |
+          find workspace_deploy/Explore -name "*.Project.json" -not -path "*/.*" | sed 's|workspace_deploy/||; s|\.json$||' > workspace_deploy/assets.txt
+          echo "Assets to deploy:"
+          cat workspace_deploy/assets.txt
+          if [ ! -s workspace_deploy/assets.txt ]; then
+            echo "No project assets found!"
+            exit 1
+          fi
+
+      - name: Repackage with overrides
+        run: |
+          ./iics package \
+            -w workspace_deploy \
+            -f workspace_deploy/assets.txt \
+            -z ready_to_deploy.zip
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-package
+          path: ready_to_deploy.zip
+
+  # ---- JOB 4: Deploy to target environment ----
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    needs: build-package
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download final package
+        uses: actions/download-artifact@v4
+        with:
+          name: final-package
+          path: ./
+
+      - name: Import to ${{ github.event.inputs.environment }}
+        run: |
+          ./iics import \
+            -n "Deploy_${{ github.run_id }}" \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }} \
+            -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
+            -z ready_to_deploy.zip \
+            -s true
