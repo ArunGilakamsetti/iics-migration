@@ -3,6 +3,10 @@
     {
       "sourceConnectionName": "Sample Salesforce Connection",
       "targetConnectionName": "Sample Salesforce Connection UAT"
+    },
+    {
+      "sourceConnectionName": "Snowflake Connection",
+      "targetConnectionName": "Snowflake Connection UAT"
     }
   ],
   "agentOverrides": [
