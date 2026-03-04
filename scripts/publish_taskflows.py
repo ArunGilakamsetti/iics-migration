@@ -38,10 +38,10 @@ def publish_taskflow(session_id, pod_host, taskflow_id, taskflow_name):
     headers = {"INFA-SESSION-ID": session_id}
     resp = requests.post(url, headers=headers)
     if resp.status_code in (200, 204):
-        print(f"✅ Published taskflow: {taskflow_name}")
+        print(f"Published taskflow: {taskflow_name}")
         return True
     else:
-        print(f"❌ Failed to publish {taskflow_name}: {resp.status_code} {resp.text}")
+        print(f"Failed to publish {taskflow_name}: {resp.status_code} {resp.text}")
         return False
 
 def main():
