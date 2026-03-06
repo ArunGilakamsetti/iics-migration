@@ -216,44 +216,30 @@ jobs:
             --label "auto-pr,promotion" || echo "PR creation failed (maybe already exists)"
 
   # NEW: Publish Taskflows after successful import
-  publish-taskflows:
-    name: Publish Taskflows
-    needs: [prepare-version, import]
-    if: success()
-    runs-on: ubuntu-latest
-    environment: ${{ needs.prepare-version.outputs.environment }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+publish-taskflows:
+  name: Publish Taskflows
+  needs: import   # or adjust based on your job structure
+  runs-on: ubuntu-latest
+  environment: ${{ github.event.inputs.environment }}
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install requests
+    - name: Install dependencies
+      run: pip install requests
 
-      - name: Download taskflow list
-        uses: actions/download-artifact@v4
-        with:
-          name: taskflow-list
-          path: ./
-
-      - name: Run publish script
-        env:
-          IICS_POD_HOST: ${{ env.IICS_POD_HOST }}
-        run: |
-          if [ -s taskflows.txt ]; then
-            python scripts/publish_taskflows.py \
-              "${{ secrets[format('{0}_IICS_USER', needs.prepare-version.outputs.environment)] }}" \
-              "${{ secrets[format('{0}_IICS_PWD', needs.prepare-version.outputs.environment)] }}" \
-              "${{ env.IICS_POD_HOST }}" \
-              "${{ env.IICS_REGION }}" \
-              $(cat taskflows.txt)
-          else
-            echo "No taskflows to publish."
-          fi
+    - name: Publish taskflows
+      env:
+        IICS_BASE_URL: https://apse1.dm-ap.informaticacloud.com   # your pod URL
+        IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
+        IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
+        TASKFLOW_FILTER: ""  # optional: e.g., "Sales" to only publish those containing "Sales"
+      run: python scripts/publish_taskflows.py
 
   # --- JOB 4: ROLLBACK (Only on Failure) ---
   rollback:
