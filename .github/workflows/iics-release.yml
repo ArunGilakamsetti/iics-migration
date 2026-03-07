@@ -119,6 +119,6 @@ jobs:
             - Objects: ${{ github.event.inputs.objects || 'All leaf assets' }}
           files: |
             release-*.zip
-            taskflows.txt   # Add taskflows.txt as an asset
+            taskflows.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
