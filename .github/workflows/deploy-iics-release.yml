@@ -216,30 +216,33 @@ jobs:
             --label "auto-pr,promotion" || echo "PR creation failed (maybe already exists)"
 
   # NEW: Publish Taskflows after successful import
-publish-taskflows:
-  name: Publish Taskflows
-  needs: import   # or adjust based on your job structure
-  runs-on: ubuntu-latest
-  environment: ${{ github.event.inputs.environment }}
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+  publish-taskflows:
+    name: Publish Taskflows
+    needs: import   # or the job that performs import
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Download taskflows list
+        uses: actions/download-artifact@v4
+        with:
+          name: taskflows-list
+          path: ./
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: pip install requests
+      - name: Install dependencies
+        run: pip install requests
 
-    - name: Publish taskflows
-      env:
-        IICS_BASE_URL: https://apse1.dm-ap.informaticacloud.com   # your pod URL
-        IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
-        IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
-        TASKFLOW_FILTER: ""  # optional: e.g., "Sales" to only publish those containing "Sales"
-      run: python scripts/publish_taskflows.py
+      - name: Publish taskflows
+        env:
+          IICS_BASE_URL: https://apse1.dm-ap.informaticacloud.com
+          IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
+          IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
+          TASKFLOW_FILE: taskflows.txt
+        run: python scripts/publish_taskflows.py
 
   # --- JOB 4: ROLLBACK (Only on Failure) ---
   rollback:
