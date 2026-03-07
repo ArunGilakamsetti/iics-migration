@@ -116,6 +116,9 @@ jobs:
             **IICS Assets exported from Dev**
             - Version: ${{ github.event.inputs.version }}
             - Triggered by: ${{ github.actor }}
-          files: release-*.zip
+            - Objects: ${{ github.event.inputs.objects || 'All leaf assets' }}
+          files: |
+            release-*.zip
+            taskflows.txt   # Add taskflows.txt as an asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
