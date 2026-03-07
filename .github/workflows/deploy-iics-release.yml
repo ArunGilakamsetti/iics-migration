@@ -218,10 +218,13 @@ jobs:
   # NEW: Publish Taskflows after successful import
   publish-taskflows:
     name: Publish Taskflows
-    needs: [prepare-version, import]
+    needs: [prepare-version, import]   # adjust job names as needed
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download taskflows list from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
