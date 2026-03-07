@@ -216,41 +216,42 @@ jobs:
             --label "auto-pr,promotion" || echo "PR creation failed (maybe already exists)"
 
   # NEW: Publish Taskflows after successful import
-  publish-taskflows:
-    name: Publish Taskflows
-    needs: [prepare-version, import]   # adjust job names as needed
-    runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    publish-taskflows:
+      name: Publish Taskflows
+      needs: [prepare-version, import]   # adjust job names as needed
+      runs-on: ubuntu-latest
+      environment: ${{ github.event.inputs.environment }}
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
 
-      - name: Download taskflows list from release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ needs.prepare-version.outputs.version }}"
-          echo "Downloading taskflows.txt from release $VERSION"
-          gh release download "$VERSION" \
-            --pattern "taskflows.txt" \
-            --output taskflows.txt \
-            --repo ${{ github.repository }}
+        - name: Download taskflows list from release
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            VERSION="${{ needs.prepare-version.outputs.version }}"
+            echo "Downloading taskflows.txt from release $VERSION"
+            gh release download "$VERSION" \
+              --pattern "taskflows.txt" \
+              --output taskflows.txt \
+              --repo ${{ github.repository }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        - name: Set up Python
+          uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install requests
+        - name: Install dependencies
+          run: pip install requests
 
-      - name: Publish taskflows
-        env:
-          IICS_BASE_URL: https://apse1.dm-ap.informaticacloud.com
-          IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
-          IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
-          TASKFLOW_FILE: taskflows.txt
-        run: python scripts/publish_taskflows.py
+        - name: Publish taskflows
+          env:
+            IICS_LOGIN_HOST: dm-ap.informaticacloud.com
+            IICS_API_HOST: apse1.dm-ap.informaticacloud.com
+            IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
+            IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
+            TASKFLOW_FILE: taskflows.txt
+          run: python scripts/publish_taskflows.py
 
   # --- JOB 4: ROLLBACK (Only on Failure) ---
   rollback:

@@ -11,15 +11,16 @@ import os
 from typing import Set, Dict, Optional
 
 class IICSTaskflowPublisher:
-    def __init__(self, base_url: str, username: str, password: str):
-        self.base_url = base_url
+    def __init__(self, login_host: str, api_host: str, username: str, password: str):
+        self.login_host = login_host
+        self.api_host = api_host
         self.username = username
         self.password = password
         self.session_id = None
         self.headers = None
 
     def login(self) -> bool:
-        login_url = f"{self.base_url}/saas/public/core/v3/login"
+        login_url = f"https://{self.login_host}/saas/public/core/v3/login"
         payload = {"username": self.username, "password": self.password}
         try:
             resp = requests.post(login_url, json=payload, timeout=30)
@@ -39,41 +40,34 @@ class IICSTaskflowPublisher:
 
     def find_taskflow_by_name(self, name: str) -> Optional[Dict]:
         """Find a taskflow by exact name."""
-        url = f"{self.base_url}/api/v2/workflow"
-        params = {"name": name, "exactMatch": "true"}  # some APIs support exact match; fallback to filtering
+        url = f"https://{self.api_host}/api/v2/workflow"
+        params = {"pageSize": 100}
+        all_items = []
+        page_token = None
         try:
-            resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-            if resp.status_code == 200:
+            while True:
+                if page_token:
+                    params["pageToken"] = page_token
+                resp = requests.get(url, headers=self.headers, params=params, timeout=30)
+                if resp.status_code != 200:
+                    break
                 data = resp.json()
-                items = data.get("items", [])
-                # If API doesn't support exact match, filter client-side
-                if not items:
-                    # fallback: list all and filter
-                    all_items = []
-                    page_token = None
-                    while True:
-                        page_params = {"pageSize": 100}
-                        if page_token:
-                            page_params["pageToken"] = page_token
-                        r = requests.get(url, headers=self.headers, params=page_params, timeout=30)
-                        if r.status_code != 200:
-                            break
-                        page_data = r.json()
-                        all_items.extend(page_data.get("items", []))
-                        next_token = page_data.get("nextPageToken")
-                        if not next_token:
-                            break
-                        page_token = next_token
-                    items = [tf for tf in all_items if tf.get("name") == name]
-                if items:
-                    return items[0]
+                all_items.extend(data.get("items", []))
+                next_token = data.get("nextPageToken")
+                if not next_token:
+                    break
+                page_token = next_token
+            # Find exact match
+            for tf in all_items:
+                if tf.get("name") == name:
+                    return tf
             return None
         except Exception as e:
             print(f"❌ Error finding taskflow {name}: {e}")
             return None
 
     def publish_taskflow(self, taskflow_id: str) -> bool:
-        url = f"{self.base_url}/api/v2/workflow/{taskflow_id}/publish"
+        url = f"https://{self.api_host}/api/v2/workflow/{taskflow_id}/publish"
         try:
             resp = requests.post(url, headers=self.headers, timeout=60)
             if resp.status_code in (200, 202):
@@ -86,7 +80,7 @@ class IICSTaskflowPublisher:
             return False
 
     def wait_for_publish(self, taskflow_id: str, timeout_seconds: int = 300) -> bool:
-        url = f"{self.base_url}/api/v2/workflow/{taskflow_id}"
+        url = f"https://{self.api_host}/api/v2/workflow/{taskflow_id}"
         start = time.time()
         poll_interval = 10
         while time.time() - start < timeout_seconds:
@@ -126,13 +120,14 @@ class IICSTaskflowPublisher:
                 print(f"  ❌ Failed to start publish.")
 
 def main():
-    base_url = os.environ.get("IICS_BASE_URL")
+    login_host = os.environ.get("IICS_LOGIN_HOST")
+    api_host = os.environ.get("IICS_API_HOST")
     username = os.environ.get("IICS_USERNAME")
     password = os.environ.get("IICS_PASSWORD")
     taskflow_file = os.environ.get("TASKFLOW_FILE", "taskflows.txt")
 
-    if not all([base_url, username, password]):
-        print("❌ Missing required environment variables")
+    if not all([login_host, api_host, username, password]):
+        print("❌ Missing required environment variables (IICS_LOGIN_HOST, IICS_API_HOST, IICS_USERNAME, IICS_PASSWORD)")
         sys.exit(1)
 
     if not os.path.exists(taskflow_file):
@@ -140,13 +135,13 @@ def main():
         return
 
     with open(taskflow_file, 'r') as f:
-        names = {line.strip() for line in f if line.strip()}
+        names = {line.strip() for line in f if line.strip() and not line.startswith('#')}
 
     if not names:
         print("ℹ️ Taskflow list is empty. Nothing to publish.")
         return
 
-    publisher = IICSTaskflowPublisher(base_url, username, password)
+    publisher = IICSTaskflowPublisher(login_host, api_host, username, password)
     if not publisher.login():
         sys.exit(1)
 
