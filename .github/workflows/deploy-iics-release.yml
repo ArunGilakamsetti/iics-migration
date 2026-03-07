@@ -216,46 +216,46 @@ jobs:
             --label "auto-pr,promotion" || echo "PR creation failed (maybe already exists)"
 
   publish-taskflows:
-  name: Publish Taskflows
-  needs: [prepare-version, import]   # adjust job names as needed
-  runs-on: ubuntu-latest
-  environment: ${{ github.event.inputs.environment }}
-  steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    name: Publish Taskflows
+    needs: [prepare-version, import]   # adjust job names as needed
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Download taskflows full list from release
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        VERSION="${{ needs.prepare-version.outputs.version }}"
-        echo "Downloading taskflows_full.txt from release $VERSION"
-        gh release download "$VERSION" \
-          --pattern "taskflows_full.txt" \
-          --output taskflows_full.txt \
-          --repo ${{ github.repository }}
+      - name: Download taskflows full list from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.prepare-version.outputs.version }}"
+          echo "Downloading taskflows_full.txt from release $VERSION"
+          gh release download "$VERSION" \
+            --pattern "taskflows_full.txt" \
+            --output taskflows_full.txt \
+            --repo ${{ github.repository }}
 
-    - name: Download IICS CLI
-      run: |
-        curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
-        chmod +x iics
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
 
-    - name: Publish taskflows using IICS CLI
-      env:
-        IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
-        IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
-      run: |
-        ./iics publish \
-          -r ${{ env.IICS_REGION }} \
-          --podHostName ${{ env.IICS_POD_HOST }} \
-          -u "$IICS_USERNAME" \
-          -p "$IICS_PASSWORD" \
-          -f taskflows_full.txt \
-          -s true
+      - name: Publish taskflows using IICS CLI
+        env:
+          IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
+          IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
+        run: |
+          ./iics publish \
+            -r ${{ env.IICS_REGION }} \
+            --podHostName ${{ env.IICS_POD_HOST }} \
+            -u "$IICS_USERNAME" \
+            -p "$IICS_PASSWORD" \
+            -f taskflows_full.txt \
+            -s true
 
-    - name: Verify publish status (optional)
-      run: |
-        echo "Taskflow publishing completed via IICS CLI"
+      - name: Verify publish status (optional)
+        run: |
+          echo "Taskflow publishing completed via IICS CLI"
 
   # --- JOB 4: ROLLBACK (Only on Failure) ---
   rollback:
