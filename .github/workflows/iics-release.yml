@@ -48,11 +48,11 @@ jobs:
           echo "Taskflows in this release (full paths):"
           cat taskflows_full.txt
 
-      - name: Upload taskflows list
+      - name: Upload taskflows full list
         uses: actions/upload-artifact@v4
         with:
-          name: taskflows-list
-          path: taskflows.txt
+          name: taskflows-full
+          path: taskflows_full.txt
 
       - name: Download IICS CLI
         run: |
@@ -114,16 +114,10 @@ jobs:
           name: iics-release-package
           path: ./
 
-      - name: Download taskflows list
-        uses: actions/download-artifact@v4
-        with:
-          name: taskflows-list
-          path: ./
-
       - name: Download taskflows full list
         uses: actions/download-artifact@v4
         with:
-          name: taskflows-list-full   # we'll give it a distinct name
+          name: taskflows-full
           path: ./
 
       - name: Create GitHub Release
@@ -131,6 +125,11 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: Release ${{ github.event.inputs.version }}
+          body: |
+            **IICS Assets exported from Dev**
+            - Version: ${{ github.event.inputs.version }}
+            - Triggered by: ${{ github.actor }}
+            - Objects: All leaf assets
           files: |
             release-*.zip
             taskflows_full.txt
