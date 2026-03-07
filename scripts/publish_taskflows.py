@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Publishes specific taskflows by name in the target environment.
-Expects a file with one taskflow name per line.
+Publishes specific taskflows by full asset path in the target environment.
+Expects a file with one asset path per line (e.g., Explore/Project/Folder/Taskflow.TASKFLOW).
 """
 
 import requests
 import time
 import sys
 import os
-from typing import Set, Dict, Optional
+import re
+from typing import Set, Dict, Optional, Tuple
 
 class IICSTaskflowPublisher:
     def __init__(self, login_host: str, api_host: str, username: str, password: str):
@@ -38,32 +39,45 @@ class IICSTaskflowPublisher:
             print(f"❌ Login failed: {e}")
             return False
 
-    def find_taskflow_by_name(self, name: str) -> Optional[Dict]:
-        """Find a taskflow by exact name."""
-        url = f"https://{self.api_host}/api/v2/workflow"
-        params = {"pageSize": 100}
-        all_items = []
-        page_token = None
-        try:
-            while True:
-                if page_token:
-                    params["pageToken"] = page_token
-                resp = requests.get(url, headers=self.headers, params=params, timeout=30)
-                if resp.status_code != 200:
-                    break
-                data = resp.json()
-                all_items.extend(data.get("items", []))
-                next_token = data.get("nextPageToken")
-                if not next_token:
-                    break
-                page_token = next_token
-            # Find exact match
-            for tf in all_items:
-                if tf.get("name") == name:
-                    return tf
+    def find_taskflow_by_path(self, asset_path: str) -> Optional[Dict]:
+        """
+        Find a taskflow by its full asset path (e.g., Explore/Project/Folder/Name.TASKFLOW).
+        Returns the taskflow object if found.
+        """
+        # Remove the leading 'Explore/' and the trailing '.TASKFLOW'
+        # Example: "Explore/Project/Folder/MyTask.TASKFLOW" -> path = "Project/Folder", name = "MyTask"
+        match = re.match(r"Explore/(.+)\.TASKFLOW$", asset_path)
+        if not match:
+            print(f"  ⚠️ Invalid taskflow path format: {asset_path}")
             return None
+        full_path = match.group(1)  # e.g., "Project/Folder/MyTask"
+        # Split into folder path and name
+        parts = full_path.split('/')
+        name = parts[-1]
+        folder_path = '/'.join(parts[:-1]) if len(parts) > 1 else ""
+
+        # Use the search API to find objects by name and location
+        url = f"https://{self.api_host}/api/v2/mdata/search"
+        params = {
+            "q": f"name:'{name}' AND type:'TASKFLOW'"
+        }
+        if folder_path:
+            params["q"] += f" AND location:'{folder_path}'"
+
+        try:
+            resp = requests.get(url, headers=self.headers, params=params, timeout=30)
+            if resp.status_code != 200:
+                print(f"  ❌ Search failed: {resp.status_code}")
+                return None
+            items = resp.json()
+            # If multiple, we might need to refine; assume first match is correct
+            if items:
+                return items[0]
+            else:
+                print(f"  ❌ Taskflow '{name}' not found in folder '{folder_path}'")
+                return None
         except Exception as e:
-            print(f"❌ Error finding taskflow {name}: {e}")
+            print(f"  ❌ Error during search: {e}")
             return None
 
     def publish_taskflow(self, taskflow_id: str) -> bool:
@@ -99,12 +113,15 @@ class IICSTaskflowPublisher:
                 time.sleep(poll_interval)
         return False
 
-    def publish_named_taskflows(self, names: Set[str]):
-        for name in names:
-            print(f"\n📦 Processing taskflow: {name}")
-            tf = self.find_taskflow_by_name(name)
+    def publish_taskflows_from_file(self, file_path: str):
+        with open(file_path, 'r') as f:
+            lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+        for path in lines:
+            print(f"\n📦 Processing taskflow: {path}")
+            tf = self.find_taskflow_by_path(path)
             if not tf:
-                print(f"  ❌ Taskflow '{name}' not found in target environment.")
+                print(f"  ❌ Taskflow not found.")
                 continue
             tf_id = tf.get("id")
             current_status = tf.get("status", "").upper()
@@ -124,28 +141,21 @@ def main():
     api_host = os.environ.get("IICS_API_HOST")
     username = os.environ.get("IICS_USERNAME")
     password = os.environ.get("IICS_PASSWORD")
-    taskflow_file = os.environ.get("TASKFLOW_FILE", "taskflows.txt")
+    taskflow_file = os.environ.get("TASKFLOW_FILE", "taskflows_full.txt")
 
     if not all([login_host, api_host, username, password]):
-        print("❌ Missing required environment variables (IICS_LOGIN_HOST, IICS_API_HOST, IICS_USERNAME, IICS_PASSWORD)")
+        print("❌ Missing required environment variables")
         sys.exit(1)
 
     if not os.path.exists(taskflow_file):
         print(f"⚠️ No taskflow file found at {taskflow_file}. Nothing to publish.")
         return
 
-    with open(taskflow_file, 'r') as f:
-        names = {line.strip() for line in f if line.strip() and not line.startswith('#')}
-
-    if not names:
-        print("ℹ️ Taskflow list is empty. Nothing to publish.")
-        return
-
     publisher = IICSTaskflowPublisher(login_host, api_host, username, password)
     if not publisher.login():
         sys.exit(1)
 
-    publisher.publish_named_taskflows(names)
+    publisher.publish_taskflows_from_file(taskflow_file)
     print("\n✅ Taskflow publishing completed.")
 
 if __name__ == "__main__":

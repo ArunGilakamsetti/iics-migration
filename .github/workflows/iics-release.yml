@@ -38,16 +38,15 @@ jobs:
           echo "Generated artifacts.txt:"
           cat artifacts.txt
 
-      - name: Extract taskflow names
+      - name: Extract taskflow full paths
         run: |
-          # Extract lines ending with .TASKFLOW, strip path and extension, save to taskflows.txt
-          grep "\\.TASKFLOW$" artifacts.txt | sed 's|.*/||; s|\.TASKFLOW$||' > taskflows.txt || true
-          # If file is empty, create a placeholder to avoid missing file error later
-          if [ ! -s taskflows.txt ]; then
-            echo "# No taskflows in this release" > taskflows.txt
+          # Filter lines ending with .TASKFLOW and save full paths
+          grep "\\.TASKFLOW$" artifacts.txt > taskflows_full.txt || true
+          if [ ! -s taskflows_full.txt ]; then
+            echo "# No taskflows in this release" > taskflows_full.txt
           fi
-          echo "Taskflows in this release:"
-          cat taskflows.txt
+          echo "Taskflows in this release (full paths):"
+          cat taskflows_full.txt
 
       - name: Upload taskflows list
         uses: actions/upload-artifact@v4
@@ -121,18 +120,19 @@ jobs:
           name: taskflows-list
           path: ./
 
+      - name: Download taskflows full list
+        uses: actions/download-artifact@v4
+        with:
+          name: taskflows-list-full   # we'll give it a distinct name
+          path: ./
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: Release ${{ github.event.inputs.version }}
-          body: |
-            **IICS Assets exported from Dev**
-            - Version: ${{ github.event.inputs.version }}
-            - Triggered by: ${{ github.actor }}
-            - Objects: All leaf assets
           files: |
             release-*.zip
-            taskflows.txt
+            taskflows_full.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -225,15 +225,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download taskflows list from release
+      - name: Download taskflows full list from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.prepare-version.outputs.version }}"
-          echo "Downloading taskflows.txt from release $VERSION"
+          echo "Downloading taskflows_full.txt from release $VERSION"
           gh release download "$VERSION" \
-            --pattern "taskflows.txt" \
-            --output taskflows.txt \
+            --pattern "taskflows_full.txt" \
+            --output taskflows_full.txt \
             --repo ${{ github.repository }}
 
       - name: Set up Python
@@ -250,7 +250,7 @@ jobs:
           IICS_API_HOST: apse1.dm-ap.informaticacloud.com
           IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
           IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
-          TASKFLOW_FILE: taskflows.txt
+          TASKFLOW_FILE: taskflows_full.txt
         run: python scripts/publish_taskflows.py
 
   # --- JOB 4: ROLLBACK (Only on Failure) ---
