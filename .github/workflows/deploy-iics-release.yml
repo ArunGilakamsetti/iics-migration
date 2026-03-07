@@ -218,7 +218,7 @@ jobs:
   # NEW: Publish Taskflows after successful import
   publish-taskflows:
     name: Publish Taskflows
-    needs: [prepare-version, import]   # or whatever job runs the import
+    needs: [prepare-version, import]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     steps:
@@ -228,7 +228,10 @@ jobs:
         run: |
           VERSION="${{ needs.prepare-version.outputs.version }}"
           echo "Downloading taskflows.txt from release $VERSION"
-          gh release download "$VERSION" --pattern "taskflows.txt" --output taskflows.txt
+          gh release download "$VERSION" \
+            --pattern "taskflows.txt" \
+            --output taskflows.txt \
+            --repo ${{ github.repository }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
