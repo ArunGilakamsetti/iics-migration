@@ -74,6 +74,22 @@ jobs:
             -z exported.zip \
             -s true
 
+      - name: Extract taskflow full paths
+        run: |
+          # Filter lines ending with .TASKFLOW and save full paths
+          grep "\\.TASKFLOW$" artifacts.txt > taskflows.txt || true
+          if [ ! -s taskflows.txt ]; then
+            echo "# No taskflows in this export" > taskflows.txt
+          fi
+          echo "Taskflows in this export (full paths):"
+          cat taskflows.txt
+
+      - name: Upload taskflows list
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskflows-list
+          path: taskflows.txt
+
       - name: Upload exported package
         uses: actions/upload-artifact@v4
         with:
@@ -171,3 +187,40 @@ jobs:
             -p ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }} \
             -z ready_to_deploy.zip \
             -s true
+
+  # ---- JOB 5: Publish Taskflows ----
+  publish-taskflows:
+    name: Publish Taskflows
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Download IICS CLI
+        run: |
+          curl -L -o iics https://github.com/InformaticaCloudApplicationIntegration/Tools/raw/master/IICS%20Asset%20Management%20CLI/v2/linux-x86_64/iics
+          chmod +x iics
+
+      - name: Download taskflows list
+        uses: actions/download-artifact@v4
+        with:
+          name: taskflows-list
+          path: ./
+
+      - name: Publish taskflows using IICS CLI
+        env:
+          IICS_USERNAME: ${{ secrets[format('{0}_IICS_USER', github.event.inputs.environment)] }}
+          IICS_PASSWORD: ${{ secrets[format('{0}_IICS_PWD', github.event.inputs.environment)] }}
+        run: |
+          # Check if taskflows.txt exists and is not just a comment
+          if [ -s taskflows.txt ] && ! grep -q "^#" taskflows.txt; then
+            ./iics publish \
+              -r ${{ env.IICS_REGION }} \
+              --podHostName ${{ env.IICS_POD_HOST }} \
+              -u "$IICS_USERNAME" \
+              -p "$IICS_PASSWORD" \
+              -f taskflows.txt \
+              -s true
+            echo "Taskflow publishing completed."
+          else
+            echo "No taskflows to publish."
+          fi
